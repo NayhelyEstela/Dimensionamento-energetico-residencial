@@ -1,6 +1,6 @@
 # Dimensionamento energético residencial
 
-## Desenvoldores do Grupo
+## Desenvolvedores do Grupo
 
 | Nome  | RM    |
 | ----------------------|--------|
