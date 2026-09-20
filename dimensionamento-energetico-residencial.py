@@ -92,6 +92,7 @@ def menu(usuario):
         print("2 - Listar imóveis")
         print("3 - Editar imóvel")
         print("4 - Remover imóvel")
+        print("5 - Detalhes do imóvel")
 
         opcao = input("Escolha uma opção: ")
 
@@ -106,6 +107,8 @@ def menu(usuario):
             editar_imovel(usuario)
         elif opcao == "4":
             remover_imovel(usuario)
+        elif opcao == "5":
+            detalhes_imovel(usuario)
         else:
             print("Opção inválida, tente novamente.")
 
@@ -133,7 +136,8 @@ def cadastro_imovel(usuario):
     imovel = {
         "nome": nome_imovel,
         "endereco": endereco,
-        "tipo": tipo.lower()
+        "tipo": tipo.lower(),
+        "equipamentos": []
     }
 
     usuario["imoveis"].append(imovel)
@@ -217,6 +221,51 @@ def remover_imovel(usuario):
         print("\tIMÓVEL REMOVIDO COM SUCESSO!")
     else:
         print("\tRemoção cancelada.")
+
+
+def detalhes_imovel(usuario):
+    print("\n\tDETALHES DO IMÓVEL")
+
+    if not usuario["imoveis"]:
+        print("Nenhum imóvel cadastrado.")
+        return
+
+    # lista os imóveis com índice
+    for i, imovel in enumerate(usuario["imoveis"], start=1):
+        print(f"{i} - {imovel['nome']} ({imovel['tipo']}) - {imovel['endereco']}")
+
+    try:
+        escolha = int(input("Digite o número do imóvel para ver detalhes: "))
+        if escolha < 1 or escolha > len(usuario["imoveis"]):
+            print("Opção inválida.")
+            return
+    except ValueError:
+        print("Entrada inválida.")
+        return
+
+    imovel = usuario["imoveis"][escolha - 1]
+
+    # exibir dados cadastrais
+    print("\n\tDados do Imóvel")
+    print(f"Nome: {imovel['nome']}")
+    print(f"Endereço: {imovel['endereco']}")
+    print(f"Tipo: {imovel['tipo']}")
+
+    # exibir equipamentos vinculados
+    print("\n\tEquipamentos")
+    if "equipamentos" not in imovel or not imovel["equipamentos"]:
+        print("Nenhum equipamento cadastrado.")
+    else:
+        consumo_total = 0
+        for eq in imovel["equipamentos"]:
+            print(f"- {eq['nome']} | Quantidade: {eq['qnt']} | Tempo médio: {eq['tempo_uso']} min/dia")
+            consumo_total += eq["qnt"] * sum(eq["tempo_uso"]) if isinstance(eq["tempo_uso"], list) else eq["qnt"] * eq["tempo_uso"]
+
+        # exibir consumo total
+        print(f"\nConsumo estimado (minutos/dia): {consumo_total}")
+
+    # navegação de volta
+    input("\nPressione ENTER para voltar à lista de imóveis...")
 
 
 # PROGRAMA PRINCIPAL
