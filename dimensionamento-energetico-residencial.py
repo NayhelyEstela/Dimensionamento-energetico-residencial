@@ -250,6 +250,7 @@ def validar_inteiro_positivo(valor):
 
 def validar_numero_positivo(valor):
     try:
+        float(valor.replace(",", "."))
         return float(valor) > 0
     except ValueError:
         return False
@@ -574,7 +575,7 @@ def menu(usuario):
         print("2  - Listar imóveis")
         print("3  - Editar imóvel")
         print("4  - Remover imóvel")
-        print("5  - Detelhes do imóvel")
+        print("5  - Detalhes do imóvel")
         print("6  - Gerenciar equipamentos de um imóvel")
         print("7  - Ver consumo mensal estimado de um imóvel")
         print("8  - Ver histórico de consumo de um imóvel")
