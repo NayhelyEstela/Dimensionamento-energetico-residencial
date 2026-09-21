@@ -1,15 +1,53 @@
 # IMPORTAÇÕES
-# ----------------------------------------- 
+# -----------------------------------------
 import re       # validações
 import matplotlib.pyplot as plt
+import csv
+import math
+import os
+import unicodedata
 
-# FUNÇÕES 
-# ----------------------------------------- 
+# DATASETS
+# -----------------------------------------
+
+# HSP -------------------------------------
+CAMINHO_HSP = "hsp.csv"
+
+COLUNAS_HSP_TEXTO = ["cidade", "estado"]
+COLUNAS_HSP_NUM = ["hsp"]
+
+# MODULOS ---------------------------------
+CAMINHO_MODULOS = "modulos.csv"          # task 12
+
+COLUNAS_MODULOS_TEXTO = ["id", "fabricante", "modelo"]
+COLUNAS_MODULOS_NUM = ["potencia_wp", "preco", "voc_v", "vmp_v", "imp_a"]
+
+# INVERSORES ------------------------------
+CAMINHO_INVERSORES = "inversores.csv"    # task 12
+
+COLUNAS_INVERSORES_TEXTO = ["id", "fabricante", "modelo", "compativel_bateria"]
+COLUNAS_INVERSORES_NUM = ["potencia_nominal_kw", "potencia_max_fv_kw", "mppt_min_v",
+                          "tensao_max_v", "corrente_max_entrada_a", "numero_mppt", "preco"]
+
+# PARÂMETROS (justificativas no README)
+# -----------------------------------------
+
+LIMITE_PERCENTUAL = 100  # US01: 0 < f <= 100
+DIAS_GERACAO = 30  # D
+EFICIENCIA_SISTEMA = 0.80  # η
+DIAS_MES_BATERIA = 30  # divisor de E_d
+DOD_PADRAO = 0.80  # DoD usado em C_bat (US06)
+EFICIENCIA_BATERIA = 0.90  # η_bat
+
+
+# FUNÇÕES UTILITÁRIOS
+# -----------------------------------------
+
 def validar_string(valor):
     return valor.strip() != ""
 
 def validar_email(email_cadastro):
-    # usa o regex 
+    # usa o regex
     padrao = r'^[\w\.-]+@[\w\.-]+\.\w+$'
 
     return re.match(padrao, email_cadastro) is not None
@@ -25,6 +63,98 @@ def pedir_campo(mensagem, funcao_validacao, erro):
             return valor
 
         print(f"\t{erro}")
+
+def validar_inteiro_positivo(valor):
+    return valor.isdigit() and int(valor) > 0
+
+
+def validar_numero_positivo(valor):
+    try:
+        float(valor.replace(",", "."))
+        return float(valor) > 0
+    except ValueError:
+        return False
+
+
+def converter_numero(valor):
+    return float(str(valor).strip().replace(",", "."))
+
+
+def validar_decimal_positivo(valor):
+    try:
+        return converter_numero(valor) > 0
+    except ValueError:
+        return False
+
+
+def validar_percentual(valor):
+    try:
+        return 0 < converter_numero(valor) <= LIMITE_PERCENTUAL
+    except ValueError:
+        return False
+
+
+def validar_com_sem(valor):
+    return valor.strip().lower() in ["com", "sem"]
+
+
+def validar_estado(valor):
+    return len(valor.strip()) == 2 and valor.strip().isalpha()
+
+
+def normalizar(texto):
+    sem_acento = unicodedata.normalize("NFKD", texto).encode("ASCII", "ignore").decode()
+    return " ".join(sem_acento.lower().split())
+
+
+def ler_csv_validado(caminho, colunas_texto, colunas_num):
+    if not os.path.exists(caminho):
+        print(f"\tArquivo '{caminho}' não encontrado.")
+        return None
+
+    with open(caminho, newline="", encoding="utf-8-sig") as arquivo:
+        primeira = arquivo.readline()
+        arquivo.seek(0)
+        delimitador = ";" if ";" in primeira else ","
+        leitor = csv.DictReader(arquivo, delimiter=delimitador)
+
+        faltando = [c for c in colunas_texto + colunas_num if c not in (leitor.fieldnames or [])]
+        if faltando:
+            print(f"\tColunas ausentes em '{caminho}': {', '.join(faltando)}")
+            return None
+
+        validos, invalidos = [], []
+        for numero, linha in enumerate(leitor, start=2):  # linha 1 = cabeçalho
+            registro, motivo = {}, None
+
+            for c in colunas_texto:
+                valor = (linha.get(c) or "").strip()
+                if not valor:
+                    motivo = f"campo '{c}' vazio"
+                    break
+                registro[c] = valor
+
+            if motivo is None:
+                for c in colunas_num:
+                    try:
+                        valor = converter_numero(linha.get(c) or "")
+                    except ValueError:
+                        motivo = f"campo '{c}' não numérico"
+                        break
+                    if valor <= 0:
+                        motivo = f"campo '{c}' deve ser maior que zero"
+                        break
+                    registro[c] = valor
+
+            if motivo is None:
+                validos.append(registro)
+            else:
+                invalidos.append((numero, motivo))
+
+    return validos, invalidos
+
+# FUNÇÕES REFERENTES A SP 1
+# -----------------------------------------
 
 def cadastro_usuario():
     print("\tCADASTRO DE PERFIL")
@@ -105,9 +235,13 @@ def cadastro_imovel(usuario):
         validar_tipo,
         "Tipo inválido! Digite 'casa' ou 'apartamento'.")
 
+    cidade, estado = pedir_localizacao()
+
     imovel = {
         "nome": nome_imovel,
         "endereco": endereco,
+        "cidade": cidade,
+        "estado": estado,
         "tipo": tipo.lower(),
         "equipamentos": [],
         "historico": []
@@ -160,6 +294,8 @@ def editar_imovel(usuario):
         "Novo tipo (casa/apartamento): ",
         validar_tipo,
         "Tipo inválido!")
+
+    imovel["cidade"], imovel["estado"] = pedir_localizacao("Nova ")
 
     imovel["nome"] = novo_nome
     imovel["endereco"] = novo_endereco
@@ -240,20 +376,6 @@ def detalhes_imovel(usuario):
 
     # navegação de volta
     input("\nPressione ENTER para voltar à lista de imóveis...")
-
-# PB 07 - PB 12
-# -----------------------------------------
-
-def validar_inteiro_positivo(valor):
-    return valor.isdigit() and int(valor) > 0
-
-
-def validar_numero_positivo(valor):
-    try:
-        float(valor.replace(",", "."))
-        return float(valor) > 0
-    except ValueError:
-        return False
 
 def menu_equipamentos(imovel):
     while True:
@@ -566,6 +688,327 @@ def resumo_energetico_anual(usuario):
     print(f"\n\tCONSUMO TOTAL ANUAL: {total_anual:.2f} kWh")
     print(f"\tMÊS DE MAIOR CONSUMO: {mes_maior['mes']} ({mes_maior['consumo_kwh']:.2f} kWh)")
 
+# FUNÇÕES REFERENTES A SP 2
+# -----------------------------------------
+
+def pedir_localizacao(prefixo=""):
+    cidade = pedir_campo(
+        f"{prefixo}Cidade do imóvel: ", validar_string, "Cidade é obrigatória!").strip()
+    estado = pedir_campo(
+        f"{prefixo}Estado (UF, ex: SP): ", validar_estado,
+        "Estado deve ter 2 letras (ex: SP)!").strip().upper()
+    return cidade, estado
+
+
+def garantir_localizacao(imovel):
+    """2.5: imóveis antigos sem cidade/estado têm o preenchimento solicitado."""
+    if not imovel.get("cidade") or not imovel.get("estado"):
+        print("\tEste imóvel ainda não possui localização cadastrada.")
+        imovel["cidade"], imovel["estado"] = pedir_localizacao()
+
+def obter_consumo_referencia(imovel):
+    if imovel["historico"]:
+        media = sum(r["consumo_kwh"] for r in imovel["historico"]) / len(imovel["historico"])
+        if media > 0:
+            return media, f"média de {len(imovel['historico'])} mês(es) do histórico registrado"
+
+    estimado = calcular_consumo_mensal(imovel)
+    if estimado > 0:
+        return estimado, "consumo estimado dos equipamentos (sem histórico registrado)"
+
+    return None, None
+
+def definir_energia_mensal(imovel):
+    print("\n\t- ENERGIA MENSAL DESEJADA")
+
+    c_m, origem = obter_consumo_referencia(imovel)
+    if c_m is None:
+        print("\tImóvel sem dados de consumo. Cadastre equipamentos ou registre o consumo mensal.")
+        return None
+
+    print(f"Consumo de referência (C_m): {c_m:.2f} kWh/mês")
+    print(f"Origem do C_m: {origem}")
+
+    f = converter_numero(pedir_campo(
+        f"Percentual do consumo a atender com energia solar (0 < f <= {LIMITE_PERCENTUAL}): ",
+        validar_percentual,
+        f"Percentual inválido! Digite um número maior que 0 e no máximo {LIMITE_PERCENTUAL} "
+        f"(pode usar vírgula)."))
+
+    e_fv = c_m * (f / 100)
+    print(f"\tENERGIA A GERAR (E_FV): {e_fv:.2f} kWh/mês")
+
+    return {"c_m": c_m, "origem_c_m": origem, "percentual": f, "e_fv": e_fv}
+
+def buscar_hsp(cidade, estado):
+    resultado = ler_csv_validado(CAMINHO_HSP, COLUNAS_HSP_TEXTO, COLUNAS_HSP_NUM)
+    if resultado is None:
+        return None
+
+    validos, _ = resultado
+    for registro in validos:
+        if (normalizar(registro["cidade"]) == normalizar(cidade)
+                and normalizar(registro["estado"]) == normalizar(estado)):
+            return registro
+    return None
+
+
+def obter_hsp(imovel):
+    registro = buscar_hsp(imovel["cidade"], imovel["estado"])
+
+    if registro is not None:
+        return registro["hsp"]
+
+    print(f"\tSem dado solar para {imovel['cidade']}/{imovel['estado']}.")
+    while True:
+        manual = input("Digite o HSP manualmente (kWh/m²/dia) ou ENTER para abortar: ").strip()
+        if manual == "":
+            return None
+        if validar_decimal_positivo(manual):
+            return converter_numero(manual), "manual"
+        print("\tHSP inválido! Digite um número maior que zero.")
+
+
+def calcular_potencia_fv(imovel, e_fv):
+    print("\n\t- POTÊNCIA FOTOVOLTAICA NECESSÁRIA")
+
+    garantir_localizacao(imovel)
+
+    resultado = obter_hsp(imovel)
+    if resultado is None:
+        print("\tDimensionamento abortado: não há dado de irradiação (HSP) para o imóvel.")
+        return None
+
+    hsp, origem = resultado
+    p_fv = e_fv / (hsp * DIAS_GERACAO * EFICIENCIA_SISTEMA)
+
+    print(f"HSP utilizado: {hsp:.2f} kWh/m²/dia")
+    print(f"Parâmetros: D = {DIAS_GERACAO} dias | η = {EFICIENCIA_SISTEMA}")
+    print(f"\tPOTÊNCIA NECESSÁRIA (P_FV): {p_fv:.2f} kWp")
+
+    return {"hsp": hsp, "p_fv": p_fv}
+
+def calcular_geracao_estimada(p_instalada, hsp):
+    return p_instalada * hsp * DIAS_GERACAO * EFICIENCIA_SISTEMA
+
+
+def montar_instalacao(modulo, n, hsp):
+    p_instalada = (n * modulo["potencia_wp"]) / 1000
+    return {
+        "modulo": modulo,
+        "n_modulos": n,
+        "p_instalada": p_instalada,
+        "geracao_estimada": calcular_geracao_estimada(p_instalada, hsp),
+    }
+
+
+def exibir_instalacao(inst):
+    m = inst["modulo"]
+    print(f"Módulo: {m['fabricante']} {m['modelo']} ({m['potencia_wp']:.0f} Wp) [id {m['id']}]")
+    print(f"Quantidade (N): {inst['n_modulos']}")
+    print(f"Potência instalada: {inst['p_instalada']:.2f} kWp")
+    print(f"\tGERAÇÃO ESTIMADA: {inst['geracao_estimada']:.2f} kWh/mês")
+
+
+def selecionar_modulo(p_fv, hsp):
+    print("\n\t- SELEÇÃO DE MÓDULOS")
+
+    resultado = ler_csv_validado(CAMINHO_MODULOS, COLUNAS_MODULOS_TEXTO, COLUNAS_MODULOS_NUM)
+    if resultado is None:
+        return None
+
+    validos, invalidos = resultado
+    for numero, motivo in invalidos:
+        print(f"\tAviso: linha {numero} de '{CAMINHO_MODULOS}' ignorada ({motivo}).")
+
+    if not validos:
+        print("\tLimitação: nenhum módulo válido no dataset. Não é possível dimensionar.")
+        return None
+
+    validos.sort(key=lambda m: m["preco"] / m["potencia_wp"])
+
+    print("Módulos válidos (ordenados por custo por Wp; o 1 é a sugestão):")
+    for i, m in enumerate(validos, start=1):
+        n = math.ceil((p_fv * 1000) / m["potencia_wp"])
+        print(f"{i} - {m['fabricante']} {m['modelo']} | {m['potencia_wp']:.0f} Wp | "
+              f"R$ {m['preco'] / m['potencia_wp']:.2f}/Wp | N = {n}")
+
+    while True:
+        escolha = input("Digite o número do módulo ou ENTER para aceitar a sugestão: ").strip()
+        if escolha == "":
+            modulo = validos[0]
+            break
+        if escolha.isdigit() and 1 <= int(escolha) <= len(validos):
+            modulo = validos[int(escolha) - 1]
+            break
+        print("\tOpção inválida.")
+
+    n = math.ceil((p_fv * 1000) / modulo["potencia_wp"])
+    inst = montar_instalacao(modulo, n, hsp)
+    exibir_instalacao(inst)
+    return inst
+
+def escolher_armazenamento():
+    print("\n\t- ARMAZENAMENTO POR BATERIAS")
+
+    opcao = pedir_campo(
+        "O sistema terá baterias? (com/sem): ",
+        validar_com_sem,
+        "Opção inválida! Digite 'com' ou 'sem'.").strip().lower()
+
+    if opcao == "sem":
+        print("\tSISTEMA SEM BATERIA (custo de baterias = 0; etapas de bateria puladas)")
+        return {"com_bateria": False, "autonomia_h": 0, "custo_baterias": 0.0}
+
+    autonomia = converter_numero(pedir_campo(
+        "Autonomia desejada (em horas): ",
+        validar_decimal_positivo,
+        "Autonomia inválida! Digite um número maior que zero."))
+
+    return {"com_bateria": True, "autonomia_h": autonomia, "custo_baterias": None}
+
+def configurar_strings(inv, modulo, n):
+    min_serie = math.ceil(inv["mppt_min_v"] / modulo["vmp_v"])
+    max_serie = math.floor(inv["tensao_max_v"] / modulo["voc_v"])
+
+    if max_serie < 1 or min_serie > max_serie:
+        return None
+
+    melhor = None
+    for n_serie in range(max_serie, min_serie - 1, -1):
+        n_strings = math.ceil(n / n_serie)
+        total = n_strings * n_serie
+        strings_por_mppt = math.ceil(n_strings / inv["numero_mppt"])
+        # Corrente de operação (Imp) comparada à corrente máxima de entrada do inversor
+        corrente_mppt = strings_por_mppt * modulo["imp_a"]
+        p_total_kw = total * modulo["potencia_wp"] / 1000
+
+        if corrente_mppt > inv["corrente_max_entrada_a"]:
+            continue
+        if p_total_kw > inv["potencia_max_fv_kw"]:
+            continue
+
+        # menor nº de módulos extras; empate -> mais módulos em série (menos strings)
+        if melhor is None or total < melhor["total"]:
+            melhor = {
+                "n_serie": n_serie, "n_strings": n_strings, "total": total,
+                "strings_por_mppt": strings_por_mppt, "corrente_mppt": corrente_mppt,
+                "p_total_kw": p_total_kw, "min_serie": min_serie, "max_serie": max_serie,
+            }
+    return melhor
+
+
+def selecionar_inversor(inst, com_bateria):
+    print("\n\t- SELEÇÃO DE INVERSOR")
+
+    resultado = ler_csv_validado(CAMINHO_INVERSORES, COLUNAS_INVERSORES_TEXTO,
+                                 COLUNAS_INVERSORES_NUM)
+    if resultado is None:
+        return None
+
+    validos, invalidos = resultado
+    for numero, motivo in invalidos:
+        print(f"\tAviso: linha {numero} de '{CAMINHO_INVERSORES}' ignorada ({motivo}).")
+
+    if com_bateria:  # 4.2
+        validos = [i for i in validos if i["compativel_bateria"].lower() == "sim"]
+
+    modulo = inst["modulo"]
+    compativeis = []
+    for inv in validos:
+        config = configurar_strings(inv, modulo, inst["n_modulos"])
+        if config is not None:
+            compativeis.append((inv, config))  # incompatíveis descartados antes do preço
+
+    if not compativeis:
+        print("\tNenhum inversor do dataset é compatível com a configuração escolhida.")
+        return None
+
+    inv, config = min(compativeis, key=lambda x: x[0]["preco"])  # critério: menor preço
+
+    print(f"Inversores compatíveis: {len(compativeis)} de {len(validos)} analisados")
+    print(f"Inversor selecionado: {inv['fabricante']} {inv['modelo']} [id {inv['id']}]")
+    print("Parâmetros comparados:")
+    print(f"  - Módulos por string: {config['n_serie']} "
+          f"(faixa permitida {config['min_serie']} a {config['max_serie']})")
+    print(f"  - Tensão Voc da string: {config['n_serie'] * modulo['voc_v']:.1f} V "
+          f"(máx. {inv['tensao_max_v']:.0f} V)")
+    print(f"  - Tensão Vmp da string: {config['n_serie'] * modulo['vmp_v']:.1f} V "
+          f"(MPPT mín. {inv['mppt_min_v']:.0f} V)")
+    print(f"  - Strings: {config['n_strings']} em {int(inv['numero_mppt'])} MPPT(s) "
+          f"-> {config['corrente_mppt']:.1f} A por MPPT "
+          f"(máx. {inv['corrente_max_entrada_a']:.1f} A)")
+    print(f"  - Potência FV: {config['p_total_kw']:.2f} kWp "
+          f"(máx. {inv['potencia_max_fv_kw']:.2f} kW)")
+
+    return {"inversor": inv, "configuracao": config}
+
+def calcular_capacidade_bateria(c_m, autonomia_h):
+    print("\n\t- CAPACIDADE DE ARMAZENAMENTO")
+
+    e_d = c_m / DIAS_MES_BATERIA
+    e_autonomia = e_d * (autonomia_h / 24)
+    c_bat = e_autonomia / (DOD_PADRAO * EFICIENCIA_BATERIA)
+
+    print(f"Energia diária (E_d): {e_d:.2f} kWh")
+    print(f"Autonomia utilizada: {autonomia_h:.1f} h -> E_autonomia: {e_autonomia:.2f} kWh")
+    print(f"Parâmetros: DoD = {DOD_PADRAO} | η_bat = {EFICIENCIA_BATERIA}")
+    print(f"\tCAPACIDADE NECESSÁRIA (C_bat): {c_bat:.2f} kWh")
+
+    return {"e_d": e_d, "e_autonomia": e_autonomia, "c_bat": c_bat,
+            "dod": DOD_PADRAO, "eta_bat": EFICIENCIA_BATERIA}
+
+
+# ORQUESTRAÇÃO
+# -----------------------------------------
+
+def dimensionar_fotovoltaico(usuario):
+    print("\n\tDIMENSIONAMENTO FOTOVOLTAICO")
+
+    imovel = selecionar_imovel(usuario)  # 1.2
+    if imovel is None:
+        return
+
+    energia = definir_energia_mensal(imovel)  # US01
+    if energia is None:
+        return
+
+    potencia = calcular_potencia_fv(imovel, energia["e_fv"])  # US02
+    if potencia is None:
+        return
+
+    instalacao = selecionar_modulo(potencia["p_fv"], potencia["hsp"])  # US03
+    if instalacao is None:
+        return
+
+    armazenamento = escolher_armazenamento()
+
+    inversor = selecionar_inversor(instalacao, armazenamento["com_bateria"])  # US04
+    if inversor is None:
+        return
+
+    # Se o arranjo de strings exigiu módulos extras, atualiza a instalação
+    total = inversor["configuracao"]["total"]
+    if total != instalacao["n_modulos"]:
+        print(f"\n\tAjuste: o arranjo de strings exige {total} módulos "
+              f"(dimensionado: {instalacao['n_modulos']}).")
+        instalacao = montar_instalacao(instalacao["modulo"], total, potencia["hsp"])
+        exibir_instalacao(instalacao)
+
+    bateria = None
+    if armazenamento["com_bateria"]:
+        bateria = calcular_capacidade_bateria(energia["c_m"], armazenamento["autonomia_h"])
+
+    imovel["proposta"] = {
+        "energia": energia,
+        "potencia": potencia,
+        "instalacao": instalacao,
+        "armazenamento": armazenamento,
+        "inversor": inversor,
+        "bateria": bateria,
+    }
+
+    print("\n\tDIMENSIONAMENTO CONCLUÍDO E SALVO NO IMÓVEL!")
 
 def menu(usuario):
     while True:
@@ -583,6 +1026,7 @@ def menu(usuario):
         print("10 - Ver ranking de equipamentos de um imóvel")
         print("11 - Comparativo entre imóveis")
         print("12 - Resumo energético anual")
+        print("13 - Dimensionamento fotovoltaico")
 
         opcao = input("Escolha uma opção: ")
 
@@ -623,12 +1067,39 @@ def menu(usuario):
             relatorio_comparativo(usuario)
         elif opcao == "12":
             resumo_energetico_anual(usuario)
+        elif opcao == "13":
+            dimensionar_fotovoltaico(usuario)
         else:
             print("Opção inválida, tente novamente.")
 
+# APENAS PARA TESTE
+# -----------------------------------------
+
+def criar_csvs_exemplo():
+
+    if not os.path.exists(CAMINHO_MODULOS):
+        with open(CAMINHO_MODULOS, "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(["id", "fabricante", "modelo", "potencia_wp", "preco",
+                        "voc_v", "vmp_v", "imp_a"])
+            w.writerow(["M01", "FabricanteA", "Mod550", 550, 650, 49.5, 41.5, 13.25])
+            w.writerow(["M02", "FabricanteB", "Mod600", 600, 780, 51.0, 43.0, 13.95])
+
+    if not os.path.exists(CAMINHO_INVERSORES):
+        with open(CAMINHO_INVERSORES, "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(["id", "fabricante", "modelo", "potencia_nominal_kw", "potencia_max_fv_kw",
+                        "mppt_min_v", "tensao_max_v", "corrente_max_entrada_a",
+                        "numero_mppt", "preco", "compativel_bateria"])
+            w.writerow(["I01", "FabricanteX", "Inv5k", 5, 7.5, 80, 600, 16, 2, 3800, "nao"])
+            w.writerow(["I02", "FabricanteY", "Inv10k", 10, 15, 200, 1000, 20, 2, 6500, "sim"])
+
+
+
 # PROGRAMA PRINCIPAL
 # -----------------------------------------
-print("\n\t\tDIMENSIONAMENTO ENERGÉTICO RESIDENCIAL")
+
+print("\n\t\tDIMENSIONAMENTO ENERGÉTICO E FOTOVOLTAICO RESIDENCIAL")
 print("=" * 65)
 
 # === CADASTRO ===
@@ -637,6 +1108,8 @@ usuario = cadastro_usuario()
 # === LOGIN ===
 verificar_login(usuario["email"], usuario["senha"])
 
+# === TESTE ===
+criar_csvs_exemplo()
+
 # === MENU ===
 menu(usuario)
-
