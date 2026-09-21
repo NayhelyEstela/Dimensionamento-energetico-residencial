@@ -37,7 +37,7 @@ Sistema de terminal (CLI) em Python para cadastro de imóveis, controle de equip
 ## Instalação
 
 ```bash
-git clone <url-do-repositorio>
+git clone https://github.com/NayhelyEstela/Dimensionamento-energetico-residencial.git
 cd dimensionamento-energetico-residencial
 pip install matplotlib
 ```
