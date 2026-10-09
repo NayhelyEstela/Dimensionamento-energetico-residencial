@@ -6,6 +6,8 @@ import csv
 import math
 import os
 import unicodedata
+import hashlib
+import secrets
 
 # DATASETS
 # -----------------------------------------
