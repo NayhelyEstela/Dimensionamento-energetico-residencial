@@ -9,8 +9,10 @@ import unicodedata
 import hashlib
 import secrets
 
+
 # DATASETS
 # -----------------------------------------
+
 
 # HSP -------------------------------------
 CAMINHO_HSP = "hsp.csv"
@@ -18,11 +20,13 @@ CAMINHO_HSP = "hsp.csv"
 COLUNAS_HSP_TEXTO = ["cidade", "estado"]
 COLUNAS_HSP_NUM = ["hsp"]
 
+
 # MODULOS ---------------------------------
 CAMINHO_MODULOS = "modulos.csv"          # task 12
 
 COLUNAS_MODULOS_TEXTO = ["id", "fabricante", "modelo"]
 COLUNAS_MODULOS_NUM = ["potencia_wp", "preco", "voc_v", "vmp_v", "imp_a"]
+
 
 # INVERSORES ------------------------------
 CAMINHO_INVERSORES = "inversores.csv"    # task 12
@@ -31,9 +35,9 @@ COLUNAS_INVERSORES_TEXTO = ["id", "fabricante", "modelo", "compativel_bateria"]
 COLUNAS_INVERSORES_NUM = ["potencia_nominal_kw", "potencia_max_fv_kw", "mppt_min_v",
                           "tensao_max_v", "corrente_max_entrada_a", "numero_mppt", "preco"]
 
+
 # PARÂMETROS (justificativas no README)
 # -----------------------------------------
-
 LIMITE_PERCENTUAL = 100  # US01: 0 < f <= 100
 DIAS_GERACAO = 30  # D
 EFICIENCIA_SISTEMA = 0.80  # η
@@ -44,7 +48,6 @@ EFICIENCIA_BATERIA = 0.90  # η_bat
 
 # FUNÇÕES UTILITÁRIOS
 # -----------------------------------------
-
 def validar_string(valor):
     return valor.strip() != ""
 
@@ -155,16 +158,169 @@ def ler_csv_validado(caminho, colunas_texto, colunas_num):
 
     return validos, invalidos
 
-# FUNÇÕES REFERENTES A SP 1
-# -----------------------------------------
 
-def cadastro_usuario():
-    print("\tCADASTRO DE PERFIL")
+# PERSISTÊNCIA
+# -----------------------------------------
+PASTA_DADOS = "dados"
+CAMINHO_USUARIOS = os.path.join(PASTA_DADOS, "usuarios.csv")
+CAMINHO_IMOVEIS = os.path.join(PASTA_DADOS, "imoveis.csv")
+CAMINHO_EQUIPAMENTOS = os.path.join(PASTA_DADOS, "equipamentos.csv")
+CAMINHO_HISTORICO = os.path.join(PASTA_DADOS, "historico_consumo.csv")
+
+CAMPOS_USUARIOS = ["id_usuario", "nome", "email", "senha_hash"]
+CAMPOS_IMOVEIS = ["id_imovel", "id_usuario", "nome", "endereco", "cidade", "estado", "tipo"]
+CAMPOS_EQUIPAMENTOS = ["id_equipamento", "id_imovel", "nome", "quantidade",
+                       "potencia_watts", "horas_uso"]
+CAMPOS_HISTORICO = ["id_imovel", "mes", "consumo_kwh"]
+
+
+def gerar_hash_senha(senha, salt=None):
+    salt = salt or secrets.token_hex(8)
+    h = hashlib.pbkdf2_hmac("sha256", senha.encode(), salt.encode(), 100_000).hex()
+    return f"{salt}${h}"
+
+
+def conferir_senha(senha, senha_hash):
+    salt = senha_hash.split("$")[0]
+    return secrets.compare_digest(gerar_hash_senha(senha, salt), senha_hash)
+
+
+def atribuir_ids(itens):
+    """Dá id aos itens novos (sem 'id'); os já salvos mantêm o seu."""
+    maior = max((i.get("id", 0) for i in itens), default=0)
+    for item in itens:
+        if "id" not in item:
+            maior += 1
+            item["id"] = maior
+
+
+def escrever_csv(caminho, campos, linhas):
+    temporario = caminho + ".tmp"
+    with open(temporario, "w", newline="", encoding="utf-8") as f:
+        escritor = csv.DictWriter(f, fieldnames=campos)
+        escritor.writeheader()
+        escritor.writerows(linhas)
+    os.replace(temporario, caminho)  # troca atômica: nunca deixa arquivo pela metade
+
+
+def salvar_dados(usuarios):
+    os.makedirs(PASTA_DADOS, exist_ok=True)
+    imoveis = [i for u in usuarios for i in u["imoveis"]]
+    equipamentos = [e for i in imoveis for e in i["equipamentos"]]
+    for itens in (usuarios, imoveis, equipamentos):
+        atribuir_ids(itens)
+
+    escrever_csv(CAMINHO_USUARIOS, CAMPOS_USUARIOS, [
+        {"id_usuario": u["id"], "nome": u["nome"], "email": u["email"],
+         "senha_hash": u["senha_hash"]} for u in usuarios])
+    escrever_csv(CAMINHO_IMOVEIS, CAMPOS_IMOVEIS, [
+        {"id_imovel": i["id"], "id_usuario": u["id"], "nome": i["nome"],
+         "endereco": i["endereco"], "cidade": i.get("cidade", ""),
+         "estado": i.get("estado", ""), "tipo": i["tipo"]}
+        for u in usuarios for i in u["imoveis"]])
+    escrever_csv(CAMINHO_EQUIPAMENTOS, CAMPOS_EQUIPAMENTOS, [
+        {"id_equipamento": e["id"], "id_imovel": i["id"], "nome": e["nome"],
+         "quantidade": e["quantidade"], "potencia_watts": e["potencia_watts"],
+         "horas_uso": e["horas_uso"]}
+        for i in imoveis for e in i["equipamentos"]])
+    escrever_csv(CAMINHO_HISTORICO, CAMPOS_HISTORICO, [
+        {"id_imovel": i["id"], "mes": r["mes"], "consumo_kwh": r["consumo_kwh"]}
+        for i in imoveis for r in i["historico"]])
+
+
+def ler_csv_dados(caminho):
+    if not os.path.exists(caminho):
+        return []
+    try:
+        with open(caminho, newline="", encoding="utf-8") as f:
+            return list(csv.DictReader(f))
+    except (OSError, UnicodeDecodeError, csv.Error):
+        os.replace(caminho, caminho + ".corrompido")
+        print(f"\tAviso: '{caminho}' estava ilegível e foi movido para '{caminho}.corrompido'.")
+        return []
+
+
+def carregar_dados():
+    usuarios, imoveis = {}, {}
+
+    for r in ler_csv_dados(CAMINHO_USUARIOS):
+        try:
+            usuarios[r["id_usuario"]] = {
+                "id": int(r["id_usuario"]), "nome": r["nome"], "email": r["email"],
+                "senha_hash": r["senha_hash"], "imoveis": []}
+        except (KeyError, ValueError):
+            print(f"\tAviso: linha inválida em '{CAMINHO_USUARIOS}' ignorada.")
+
+    for r in ler_csv_dados(CAMINHO_IMOVEIS):
+        try:
+            imovel = {
+                "id": int(r["id_imovel"]), "nome": r["nome"], "endereco": r["endereco"],
+                "cidade": r["cidade"], "estado": r["estado"], "tipo": r["tipo"],
+                "equipamentos": [], "historico": []}
+            usuarios[r["id_usuario"]]["imoveis"].append(imovel)
+            imoveis[r["id_imovel"]] = imovel
+        except (KeyError, ValueError):
+            print(f"\tAviso: linha inválida em '{CAMINHO_IMOVEIS}' ignorada.")
+
+    for r in ler_csv_dados(CAMINHO_EQUIPAMENTOS):
+        try:
+            imoveis[r["id_imovel"]]["equipamentos"].append({
+                "id": int(r["id_equipamento"]), "nome": r["nome"],
+                "quantidade": int(r["quantidade"]),
+                "potencia_watts": float(r["potencia_watts"]),
+                "horas_uso": float(r["horas_uso"])})
+        except (KeyError, ValueError):
+            print(f"\tAviso: linha inválida em '{CAMINHO_EQUIPAMENTOS}' ignorada.")
+
+    for r in ler_csv_dados(CAMINHO_HISTORICO):
+        try:
+            imoveis[r["id_imovel"]]["historico"].append(
+                {"mes": r["mes"], "consumo_kwh": float(r["consumo_kwh"])})
+        except (KeyError, ValueError):
+            print(f"\tAviso: linha inválida em '{CAMINHO_HISTORICO}' ignorada.")
+
+    return list(usuarios.values())
+
+
+# FUNÇÕES REFERENTES A CP 1
+# -----------------------------------------
+def cadastro_usuario(usuarios):
+    print("\n\tCADASTRO DE PERFIL")
 
     nome = pedir_campo(
         "Digite seu nome: ",
         validar_string,
         "Nome é obrigatório!")
+
+    while True:
+        email = pedir_campo(
+            "Digite seu e-mail: ",
+            validar_email,
+            "E-mail inválido!")
+
+        if any(u["email"].lower() == email.lower() for u in usuarios):
+            print("\tE-mail já cadastrado!")
+            continue
+        break
+
+    senha = pedir_campo(
+        "Digite sua senha (apenas numeros): ",
+        validar_senha,
+        "A senha deve conter apenas números!")
+
+    usuario = {
+        "nome": nome,
+        "email": email,
+        "senha_hash": gerar_hash_senha(senha),
+        "imoveis": []
+    }
+
+    usuarios.append(usuario)
+    print("\tCADASTRO REALIZADO COM SUCESSO!")
+    return usuario
+
+def login(usuarios):
+    print("\n\tLOGIN")
 
     email = pedir_campo(
         "Digite seu e-mail: ",
@@ -176,46 +332,35 @@ def cadastro_usuario():
         validar_senha,
         "A senha deve conter apenas números!")
 
-    print("\tCADASTRO REALIZADO COM SUCESSO!")
+    for usuario in usuarios:
+        if usuario["email"].lower() == email.lower() and conferir_senha(senha, usuario["senha_hash"]):
+            print("\tLOGIN REALIZADO COM SUCESSO!")
+            return usuario
 
-    usuario = {
-        "nome": nome,
-        "email": email,
-        "senha": senha,
-        "imoveis": []
-    }
+    print("\tE-mail ou senha incorretos!")
+    return None
 
-    return usuario
-
-def verificar_login(email_cadastro, senha_cadastro):
-    print("\n\tLOGIN")
-
+def tela_inicial(usuarios):
     while True:
-        email_login = pedir_campo(
-            "Digite seu e-mail: ",
-            validar_email,
-            "E-mail inválido!"
-        )
+        print("\n\tBEM-VINDO")
+        print("0 - Sair")
+        print("1 - Login")
+        print("2 - Cadastrar novo perfil")
 
-        if email_login != email_cadastro:
-            print("\tE-mail incorreto!")
-            continue
-        break
+        opcao = input("Escolha uma opção: ")
 
-    while True:
-        senha_login = pedir_campo(
-            "Digite sua senha (apenas numeros): ",
-            validar_senha,
-            "A senha deve conter apenas números!"
-        )
-
-        if senha_login != senha_cadastro:
-            print("\tSenha incorreta!")
-            continue
-
-        print("\tLOGIN REALIZADO COM SUCESSO!")
-        break
-
+        if opcao == "0":
+            return None
+        elif opcao == "1":
+            usuario = login(usuarios)
+            if usuario is not None:
+                return usuario
+        elif opcao == "2":
+            cadastro_usuario(usuarios)
+            salvar_dados(usuarios)
+        else:
+            print("Opção inválida, tente novamente.")
+            
 def validar_tipo(tipo):
     return tipo.lower() in ["casa", "apartamento"]
 
@@ -333,7 +478,6 @@ def remover_imovel(usuario):
     else:
         print("\tRemoção cancelada.")
 
-
 def detalhes_imovel(usuario):
     print("\n\tDETALHES DO IMÓVEL")
 
@@ -447,7 +591,6 @@ def listar_equipamentos(imovel):
             print(f"{i} - {equip['nome']} | Qtd: {equip['quantidade']} | "
                   f"Potência: {equip['potencia_watts']}W | Uso diário: {equip['horas_uso']}h")
 
-
 def selecionar_equipamento(imovel):
     if not imovel["equipamentos"]:
         print("Nenhum equipamento cadastrado.")
@@ -465,7 +608,6 @@ def selecionar_equipamento(imovel):
         return None
 
     return imovel["equipamentos"][escolha - 1]
-
 
 def editar_equipamento(imovel):
     print("\n\tEDITAR EQUIPAMENTO")
@@ -489,7 +631,6 @@ def editar_equipamento(imovel):
 
     print("\tEQUIPAMENTO EDITADO COM SUCESSO!")
 
-
 def remover_equipamento(imovel):
     print("\n\tREMOVER EQUIPAMENTO")
 
@@ -511,10 +652,8 @@ def calcular_consumo_equipamento(equipamento):
     consumo_diario_kwh = (equipamento["potencia_watts"] * equipamento["quantidade"] * equipamento["horas_uso"]) / 1000
     return consumo_diario_kwh * DIAS_MES
 
-
 def calcular_consumo_mensal(imovel):
     return sum(calcular_consumo_equipamento(equip) for equip in imovel["equipamentos"])
-
 
 def exibir_consumo_imovel(imovel):
     print(f"\n\tCONSUMO MENSAL ESTIMADO - {imovel['nome'].upper()}")
@@ -529,7 +668,6 @@ def exibir_consumo_imovel(imovel):
 
     total = calcular_consumo_mensal(imovel)
     print(f"\n\tCONSUMO TOTAL ESTIMADO: {total:.2f} kWh/mês")
-
 
 def registrar_consumo_mensal(imovel):
     print(f"\n\tREGISTRAR CONSUMO MENSAL - {imovel['nome'].upper()}")
@@ -552,7 +690,6 @@ def registrar_consumo_mensal(imovel):
 
     imovel["historico"].append(registro)
     print(f"\tCONSUMO DE {consumo:.2f} kWh REGISTRADO PARA {mes.upper()}!")
-
 
 def exibir_historico(imovel):
     print(f"\n\tHISTÓRICO DE CONSUMO - {imovel['nome'].upper()}")
@@ -587,7 +724,6 @@ def ranking_equipamentos(imovel):
         consumo = calcular_consumo_equipamento(equip)
         destaque = "  <-- MAIOR CONSUMO" if i == 1 else ""
         print(f"{i}º - {equip['nome']}: {consumo:.2f} kWh/mês{destaque}")
-
 
 def relatorio_comparativo(usuario):
     print("\n\tRELATÓRIO COMPARATIVO ENTRE IMÓVEIS")
@@ -690,9 +826,9 @@ def resumo_energetico_anual(usuario):
     print(f"\n\tCONSUMO TOTAL ANUAL: {total_anual:.2f} kWh")
     print(f"\tMÊS DE MAIOR CONSUMO: {mes_maior['mes']} ({mes_maior['consumo_kwh']:.2f} kWh)")
 
-# FUNÇÕES REFERENTES A SP 2
-# -----------------------------------------
 
+# FUNÇÕES REFERENTES A CP 2
+# -----------------------------------------
 def pedir_localizacao(prefixo=""):
     cidade = pedir_campo(
         f"{prefixo}Cidade do imóvel: ", validar_string, "Cidade é obrigatória!").strip()
@@ -700,7 +836,6 @@ def pedir_localizacao(prefixo=""):
         f"{prefixo}Estado (UF, ex: SP): ", validar_estado,
         "Estado deve ter 2 letras (ex: SP)!").strip().upper()
     return cidade, estado
-
 
 def garantir_localizacao(imovel):
     """2.5: imóveis antigos sem cidade/estado têm o preenchimento solicitado."""
@@ -754,7 +889,6 @@ def buscar_hsp(cidade, estado):
             return registro
     return None
 
-
 def obter_hsp(imovel):
     registro = buscar_hsp(imovel["cidade"], imovel["estado"])
 
@@ -769,7 +903,6 @@ def obter_hsp(imovel):
         if validar_decimal_positivo(manual):
             return converter_numero(manual), "manual"
         print("\tHSP inválido! Digite um número maior que zero.")
-
 
 def calcular_potencia_fv(imovel, e_fv):
     print("\n\t- POTÊNCIA FOTOVOLTAICA NECESSÁRIA")
@@ -793,7 +926,6 @@ def calcular_potencia_fv(imovel, e_fv):
 def calcular_geracao_estimada(p_instalada, hsp):
     return p_instalada * hsp * DIAS_GERACAO * EFICIENCIA_SISTEMA
 
-
 def montar_instalacao(modulo, n, hsp):
     p_instalada = (n * modulo["potencia_wp"]) / 1000
     return {
@@ -803,14 +935,12 @@ def montar_instalacao(modulo, n, hsp):
         "geracao_estimada": calcular_geracao_estimada(p_instalada, hsp),
     }
 
-
 def exibir_instalacao(inst):
     m = inst["modulo"]
     print(f"Módulo: {m['fabricante']} {m['modelo']} ({m['potencia_wp']:.0f} Wp) [id {m['id']}]")
     print(f"Quantidade (N): {inst['n_modulos']}")
     print(f"Potência instalada: {inst['p_instalada']:.2f} kWp")
     print(f"\tGERAÇÃO ESTIMADA: {inst['geracao_estimada']:.2f} kWh/mês")
-
 
 def selecionar_modulo(p_fv, hsp):
     print("\n\t- SELEÇÃO DE MÓDULOS")
@@ -899,7 +1029,6 @@ def configurar_strings(inv, modulo, n):
             }
     return melhor
 
-
 def selecionar_inversor(inst, com_bateria):
     print("\n\t- SELEÇÃO DE INVERSOR")
 
@@ -963,7 +1092,6 @@ def calcular_capacidade_bateria(c_m, autonomia_h):
 
 # ORQUESTRAÇÃO
 # -----------------------------------------
-
 def dimensionar_fotovoltaico(usuario):
     print("\n\tDIMENSIONAMENTO FOTOVOLTAICO")
 
@@ -1012,7 +1140,9 @@ def dimensionar_fotovoltaico(usuario):
 
     print("\n\tDIMENSIONAMENTO CONCLUÍDO E SALVO NO IMÓVEL!")
 
-def menu(usuario):
+OPCOES_QUE_ALTERAM_DADOS = ["1", "3", "4", "6", "9", "13"]
+
+def menu(usuario, usuarios):
     while True:
         print("\n\tMENU PRINCIPAL")
         print("0  - Sair")
@@ -1074,9 +1204,12 @@ def menu(usuario):
         else:
             print("Opção inválida, tente novamente.")
 
+        if opcao in OPCOES_QUE_ALTERAM_DADOS:
+            salvar_dados(usuarios)
+
+
 # APENAS PARA TESTE
 # -----------------------------------------
-
 def criar_csvs_exemplo():
 
     if not os.path.exists(CAMINHO_MODULOS):
@@ -1097,21 +1230,20 @@ def criar_csvs_exemplo():
             w.writerow(["I02", "FabricanteY", "Inv10k", 10, 15, 200, 1000, 20, 2, 6500, "sim"])
 
 
-
 # PROGRAMA PRINCIPAL
 # -----------------------------------------
-
 print("\n\t\tDIMENSIONAMENTO ENERGÉTICO E FOTOVOLTAICO RESIDENCIAL")
 print("=" * 65)
 
-# === CADASTRO ===
-usuario = cadastro_usuario()
+# === DADOS SALVOS ===
+usuarios = carregar_dados()
 
-# === LOGIN ===
-verificar_login(usuario["email"], usuario["senha"])
+# === CADASTRO / LOGIN ===
+usuario = tela_inicial(usuarios)
 
 # === TESTE ===
 criar_csvs_exemplo()
 
 # === MENU ===
-menu(usuario)
+if usuario is not None:
+    menu(usuario, usuarios)
