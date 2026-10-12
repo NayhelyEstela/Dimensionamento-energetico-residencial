@@ -1,6 +1,14 @@
 # Dimensionamento Energético Residencial
 
-Sistema de terminal (CLI) em Python para cadastro de imóveis, controle de equipamentos elétricos e estimativa do consumo de energia residencial. Permite comparar o consumo entre diferentes imóveis e gerar um gráfico comparativo com `matplotlib`.
+## Sobre o projeto
+
+O Dimensionamento Energético Residencial é uma aplicação de terminal desenvolvida em Python para auxiliar no acompanhamento do consumo de energia elétrica de imóveis residenciais e na elaboração de propostas de pré-dimensionamento fotovoltaico.
+
+O sistema permite cadastrar usuários e imóveis, registrar equipamentos elétricos, acompanhar históricos de consumo, comparar imóveis e gerar relatórios energéticos. Também realiza estimativas preliminares de sistemas fotovoltaicos, considerando módulos, inversores e baterias opcionais, além de apresentar uma estimativa de orçamento.
+
+Os dados são armazenados em arquivos CSV, permitindo preservar cadastros, informações de consumo e propostas entre diferentes execuções do programa.
+
+O projeto possui finalidade acadêmica. Os resultados são estimativas preliminares e não substituem a avaliação de um profissional habilitado nem a elaboração de um projeto executivo.
 
 ## Informações acadêmicas
 
@@ -14,124 +22,354 @@ Sistema de terminal (CLI) em Python para cadastro de imóveis, controle de equip
 
 ## Funcionalidades
 
-- **Cadastro e login de usuário** (nome, e-mail e senha numérica)
-- **Gestão de imóveis**: cadastrar, listar, editar, remover e ver detalhes
-- **Gestão de equipamentos** por imóvel: adicionar, listar, editar e remover
-- **Cálculo de consumo mensal estimado** por equipamento e por imóvel (kWh/mês)
-- **Registro e histórico de consumo mensal**, com indicação de meses acima/abaixo da média
-- **Ranking de equipamentos** por consumo dentro de um imóvel
-- **Relatório comparativo entre imóveis**, com geração de gráfico de barras (`comparativo_imoveis.png`)
-- **Resumo energético anual** por imóvel, com total do ano e mês de maior consumo
+### Usuários e imóveis
 
-## Tecnologias
+- Cadastro e autenticação de usuários.
+- Validação do formato dos endereços de e-mail.
+- Armazenamento de senhas com hash e salt.
+- Cadastro, consulta, edição e remoção de imóveis.
+- Registro de nome, endereço, cidade, estado e tipo de imóvel.
+- Persistência das informações entre execuções.
 
-- Python 3
-- [matplotlib](https://matplotlib.org/) - geração do gráfico comparativo
-- `re` - validação de e-mail (biblioteca padrão)
+### Equipamentos e consumo energético
+
+- Cadastro, consulta, edição e remoção de equipamentos por imóvel.
+- Registro de quantidade, potência elétrica e horas de uso diário.
+- Estimativa do consumo diário e mensal de cada equipamento.
+- Cálculo do consumo mensal estimado do imóvel.
+- Registro e consulta do histórico mensal de consumo.
+- Comparação do consumo registrado com a média histórica.
+- Ranking dos equipamentos de acordo com o consumo estimado.
+- Resumo energético anual, incluindo consumo total e mês de maior consumo.
+- Comparação entre imóveis, com geração de gráfico de barras.
+
+### Dimensionamento fotovoltaico
+
+- Consulta da irradiação solar média diária conforme a cidade e o estado do imóvel.
+- Estimativa da potência fotovoltaica necessária.
+- Seleção de módulos solares a partir de um catálogo.
+- Verificação preliminar da compatibilidade elétrica entre módulos e inversores.
+- Seleção opcional de baterias para armazenamento de energia.
+- Cálculo da capacidade de armazenamento e da quantidade estimada de baterias.
+- Verificação da compatibilidade entre baterias e inversores híbridos.
+- Estimativa da geração de energia do sistema.
+- Cálculo do orçamento de equipamentos e de custos adicionais estimados.
+- Exibição de um resumo consolidado da proposta.
+- Salvamento das propostas em arquivo CSV.
+
+## Tecnologias utilizadas
+
+- **Python 3:** linguagem utilizada no desenvolvimento da aplicação.
+- **CSV:** armazenamento de usuários, imóveis, equipamentos, históricos de consumo e catálogos.
+- **JSON:** representação do conteúdo consolidado das propostas dentro do arquivo CSV.
+- **Matplotlib:** geração do gráfico comparativo entre imóveis.
+- **Bibliotecas padrão do Python:** manipulação de arquivos, cálculos matemáticos, validações, expressões regulares, identificadores e proteção de senhas.
 
 ## Pré-requisitos
 
-- Python 3.10 ou superior (o código usa f-strings com aspas duplas aninhadas, suportado a partir do Python 3.12; recomenda-se usar a versão mais recente)
-- pip
+- Python 3.12 ou superior, recomendado para executar o código atual.
+- `pip`, para instalação das dependências.
 
-## Instalação
+## Instalação e execução
+
+Clone o repositório e entre na pasta do projeto:
 
 ```bash
 git clone https://github.com/NayhelyEstela/Dimensionamento-energetico-residencial.git
-cd dimensionamento-energetico-residencial
+cd Dimensionamento-energetico-residencial
+```
+
+Instale a dependência externa:
+
+```bash
 pip install matplotlib
 ```
 
-## Como usar
-
-Execute o script principal:
+Execute a aplicação:
 
 ```bash
 python dimensionamento-energetico-residencial.py
 ```
 
-O fluxo do programa é:
+Para validar os catálogos de equipamentos, execute:
 
-1. **Cadastro de usuário** - informe nome, e-mail e senha (apenas números)
-2. **Login** - confirme o e-mail e a senha cadastrados
-3. **Menu principal** - navegue pelas opções numeradas para gerenciar imóveis, equipamentos e consumo
-
-### Fórmula de cálculo de consumo
-
-```
-consumo_diario (kWh) = (potência_watts × quantidade × horas_uso) / 1000
-consumo_mensal (kWh) = consumo_diario × 30
+```bash
+python validar_datasets.py
 ```
 
-## Estrutura de dados
+Para verificar erros de sintaxe nos scripts:
 
-O sistema mantém os dados em memória durante a execução, na seguinte estrutura:
-
-```
-usuario
-├── nome, email, senha
-└── imoveis []
-    ├── nome, endereco, tipo (casa/apartamento)
-    ├── equipamentos []
-    │   └── nome, quantidade, potencia_watts, horas_uso
-    └── historico []
-        └── mes, consumo_kwh
+```bash
+python -m py_compile dimensionamento-energetico-residencial.py validar_datasets.py
 ```
 
-> **Observação:** os dados não são persistidos em arquivo ou banco de dados - ao encerrar o programa, as informações são perdidas.
+## Funcionamento do sistema
 
-## Saída gerada
+O programa apresenta um menu interativo no terminal. O usuário realiza o cadastro e o login e, em seguida, acessa as funcionalidades disponíveis para gerenciar imóveis, equipamentos e consumo energético.
 
-Ao executar o relatório comparativo entre imóveis (opção 11), um gráfico de barras é salvo no diretório do projeto como `comparativo_imoveis.png`.
+Para realizar o dimensionamento fotovoltaico, é necessário selecionar um imóvel com informações de localização e dados suficientes para estimar o consumo. O sistema utiliza o histórico de consumo, quando disponível, ou estima o consumo a partir dos equipamentos cadastrados.
 
-## Dados de teste
+A localização é utilizada para consultar a base de irradiação solar. Caso não exista um registro correspondente à cidade e ao estado informados, o programa pode solicitar um valor manual de HSP. Se não houver um valor válido disponível, o dimensionamento é interrompido.
 
-Como o programa não tem persistência, é preciso recadastrar tudo a cada execução. Use os valores abaixo como um roteiro rápido para testar o sistema sem precisar inventar dados na hora.
+Ao final do processo, o programa apresenta a configuração estimada do sistema e seus custos. A proposta é armazenada para consulta posterior.
 
-**1. Cadastro de usuário / Login**
+## Cálculo do consumo energético
 
-| Campo | Valor sugerido |
-|---|---|
-| Nome | Usuário Teste |
-| E-mail | teste@teste.com |
-| Senha | 1234 |
+O consumo diário estimado de um equipamento é calculado por:
 
-Repita e-mail e senha na etapa de login.
+\[
+C_{\text{diário}} =
+\frac{P \times Q \times H}{1000}
+\]
 
-**2. Imóvel 1**
+Em que:
 
-| Campo | Valor sugerido |
-|---|---|
-| Nome/apelido | Casa Principal |
-| Endereço | Rua das Flores, 100 |
-| Tipo | casa |
+- \(P\): potência do equipamento, em watts.
+- \(Q\): quantidade de unidades.
+- \(H\): horas de uso diário.
+- \(C_{\text{diário}}\): consumo estimado, em kWh/dia.
 
-Equipamentos do Imóvel 1 (opção 6 -> 1):
+Considerando um mês padrão de 30 dias:
 
-| Nome | Quantidade | Potência (W) | Horas de uso/dia |
-|---|---|---|---|
-| Geladeira | 1 | 150 | 24 |
-| Chuveiro elétrico | 1 | 5500 | 0.5 |
-| Ar-condicionado | 1 | 1200 | 6 |
-| Lâmpada LED | 6 | 9 | 5 |
+\[
+C_{\text{mensal}} = C_{\text{diário}} \times 30
+\]
 
-**3. Imóvel 2**
+O consumo mensal estimado do imóvel corresponde à soma dos consumos mensais de seus equipamentos.
 
-| Campo | Valor sugerido |
-|---|---|
-| Nome/apelido | Apartamento Centro |
-| Endereço | Av. Central, 500, Apto 12 |
-| Tipo | apartamento |
+Quando há histórico de consumo, o sistema pode utilizar a média dos registros como referência para o dimensionamento. Caso contrário, utiliza a estimativa calculada a partir dos equipamentos. Se não houver dados suficientes para nenhuma dessas alternativas, a proposta não é dimensionada.
 
-Equipamentos do Imóvel 2:
+## Dimensionamento fotovoltaico
 
-| Nome | Quantidade | Potência (W) | Horas de uso/dia |
-|---|---|---|---|
-| Geladeira | 1 | 120 | 24 |
-| Micro-ondas | 1 | 1100 | 0.3 |
-| TV | 1 | 100 | 4 |
+### Irradiação solar
 
-Com os dois imóveis e equipamentos cadastrados, já é possível testar as opções 7 a 12 do menu (consumo mensal, histórico, ranking, comparativo entre imóveis e resumo anual). Para o histórico (opção 9), registre o consumo em dois ou mais meses (ex.: `Janeiro/2026`, `Fevereiro/2026`) para visualizar a comparação com a média.
+O sistema utiliza o arquivo `hsp.csv`, que relaciona cidades e estados brasileiros a valores de Horas de Sol Pleno (HSP), expressos em kWh/m²/dia.
+
+A base identifica como referência o Atlas Brasileiro de Energia Solar, segunda edição, publicado pelo INPE/LABREN em 2017. O valor consultado é utilizado como parâmetro para estimar a potência necessária do sistema fotovoltaico.
+
+A HSP representa uma medida equivalente da energia solar recebida diariamente por unidade de área, expressa em horas à irradiância de referência de 1 kW/m².
+
+Fonte: [Atlas Brasileiro de Energia Solar — INPE/LABREN](https://labren.ccst.inpe.br/atlas_2017.html).
+
+### Potência necessária
+
+A potência fotovoltaica necessária é estimada considerando o consumo mensal de referência, a HSP local, o número de dias adotado no cálculo e um fator global de desempenho.
+
+De forma geral, o cálculo considera:
+
+\[
+P_{\text{FV}} =
+\frac{C_m}{D \times HSP \times \eta}
+\]
+
+Em que:
+
+- \(P_{\text{FV}}\): potência fotovoltaica necessária, em kW.
+- \(C_m\): consumo mensal de referência, em kWh/mês.
+- \(D\): quantidade de dias considerada no mês.
+- \(HSP\): horas de sol pleno médias por dia.
+- \(\eta\): fator global de desempenho adotado no sistema.
+
+Os parâmetros utilizados devem ser interpretados como premissas de estimativa, e não como garantias de geração real. O resultado depende da qualidade dos dados de entrada e das simplificações adotadas.
+
+### Seleção de módulos e inversores
+
+Os módulos são selecionados a partir de `modulos.csv`, considerando suas características elétricas, potência e preço.
+
+A análise preliminar de compatibilidade com o inversor considera os limites de tensão, a faixa de operação MPPT, a corrente de entrada, o número de MPPTs e a potência fotovoltaica máxima admitida.
+
+A quantidade de módulos e a configuração das strings devem respeitar os limites elétricos verificados pelo sistema. Inversores que não atendam aos critérios de compatibilidade são descartados antes da escolha final.
+
+O preço é utilizado como critério econômico entre alternativas tecnicamente compatíveis. A opção de menor custo não deve ser interpretada como uma garantia de melhor desempenho global.
+
+### Dimensionamento das baterias
+
+A utilização de baterias é opcional. Quando selecionado o armazenamento, o sistema estima a capacidade necessária de acordo com o consumo de referência e a autonomia informada.
+
+A capacidade útil de uma bateria é calculada por:
+
+\[
+C_{\text{útil}} =
+C_{\text{nominal}} \times \frac{DoD}{100}
+\]
+
+Em que \(DoD\) representa a profundidade de descarga percentual informada no catálogo.
+
+A quantidade estimada de baterias é calculada pelo arredondamento para cima da razão entre a capacidade necessária e a capacidade útil de uma unidade:
+
+\[
+N_{\text{baterias}} =
+\left\lceil
+\frac{C_{\text{necessária}}}{C_{\text{útil}}}
+\right\rceil
+\]
+
+A seleção considera a compatibilidade da tensão nominal da bateria com a faixa aceita pelo inversor híbrido. Entre as opções compatíveis, o sistema pode recomendar a alternativa de menor custo por kWh útil.
+
+Se não houver uma combinação válida de equipamentos, a proposta não deve ser apresentada como compatível.
+
+### Estimativa de geração
+
+A geração fotovoltaica é estimada a partir da potência instalada, da HSP e do fator de desempenho adotado. Trata-se de uma aproximação da produção energética, sujeita à variação da irradiação, às condições de instalação, à temperatura, às sombras e às perdas reais do sistema.
+
+O percentual de atendimento representa uma comparação estimada entre a energia produzida pelo sistema e o consumo de referência do imóvel. Ele não garante autonomia energética nem substitui uma análise detalhada do perfil de consumo.
+
+## Estimativa de orçamento
+
+O orçamento considera os preços unitários registrados nos catálogos e as quantidades selecionadas na proposta.
+
+Os custos são organizados da seguinte forma:
+
+- **Custo dos módulos:** preço unitário multiplicado pela quantidade de módulos.
+- **Custo do inversor:** preço do inversor selecionado.
+- **Custo das baterias:** preço unitário multiplicado pela quantidade de baterias; quando não há baterias, o custo é zero.
+- **Custo dos equipamentos:** soma dos custos de módulos, inversor e baterias.
+- **Demais custos estimados:** percentual adicional aplicado ao custo dos equipamentos, destinado a representar itens como estrutura, cabeamento, proteções e instalação.
+- **Custo total estimado:** soma dos custos dos equipamentos e dos demais custos estimados.
+
+No modelo acadêmico atual, os demais custos correspondem a 20% do custo dos equipamentos. Esse percentual é uma premissa simplificada, não uma cotação comercial.
+
+Os dados de preço devem ser interpretados conforme o fornecedor, a data de coleta e a fonte registrada no catálogo. Os valores podem sofrer alterações e não representam necessariamente preços vigentes no momento da consulta.
+
+## Estrutura dos arquivos
+
+O projeto utiliza a seguinte organização:
+
+```text
+Dimensionamento-energetico-residencial/
+├── dimensionamento-energetico-residencial.py
+├── validar_datasets.py
+├── README.md
+├── LICENSE
+├── .gitignore
+├── hsp.csv
+├── modulos.csv
+├── inversores.csv
+├── baterias.csv
+└── dados/
+    ├── usuarios.csv
+    ├── imoveis.csv
+    ├── equipamentos.csv
+    ├── historico_consumo.csv
+    └── propostas.csv
+```
+
+### Catálogo de módulos — `modulos.csv`
+
+Contém os dados técnicos e comerciais dos módulos fotovoltaicos.
+
+Principais campos:
+
+- `id`: identificador do módulo.
+- `fabricante` e `modelo`: identificação do equipamento.
+- `potencia_wp`: potência nominal em watts-pico.
+- `voc_v` e `isc_a`: tensão de circuito aberto e corrente de curto-circuito.
+- `vmp_v` e `imp_a`: tensão e corrente no ponto de máxima potência.
+- `eficiencia_pct`: eficiência percentual.
+- `preco_brl`: preço em reais.
+- `fornecedor`, `data_coleta` e `url_fonte`: informações de rastreabilidade.
+- `obs`: observações adicionais.
+
+### Catálogo de inversores — `inversores.csv`
+
+Contém as características elétricas e comerciais dos inversores.
+
+Principais campos:
+
+- `id`, `fabricante`, `modelo` e `tipo`.
+- `potencia_nominal_w` e `potencia_max_fv_w`.
+- `tensao_max_entrada_v`.
+- `faixa_mppt_min_v` e `faixa_mppt_max_v`.
+- `corrente_max_entrada_a` e `numero_mppt`.
+- `compativel_bateria`.
+- `tensao_bateria_min_v` e `tensao_bateria_max_v`.
+- `preco_brl`, `fornecedor`, `data_coleta`, `url_fonte` e `obs`.
+
+### Catálogo de baterias — `baterias.csv`
+
+Contém as características de capacidade, tecnologia e preço das baterias.
+
+Principais campos:
+
+- `id`, `fabricante`, `modelo` e `tecnologia`.
+- `tensao_nominal_v`.
+- `capacidade_ah` e `capacidade_kwh`.
+- `dod_pct`: profundidade de descarga percentual.
+- `ciclos`: quantidade de ciclos informada.
+- `preco_brl`, `fornecedor`, `data_coleta`, `url_fonte` e `obs`.
+
+### Base de irradiação solar — `hsp.csv`
+
+Relaciona cidade, estado, valor de HSP, fonte, endereço eletrônico da fonte e data de coleta.
+
+O arquivo é utilizado para obter o parâmetro de irradiação solar correspondente à localização cadastrada no imóvel.
+
+### Arquivos de persistência — pasta `dados/`
+
+- `usuarios.csv`: informações dos usuários e credenciais protegidas.
+- `imoveis.csv`: imóveis cadastrados e suas informações de localização.
+- `equipamentos.csv`: equipamentos vinculados aos imóveis.
+- `historico_consumo.csv`: registros mensais de consumo.
+- `propostas.csv`: propostas de dimensionamento e seus respectivos dados consolidados.
+
+Os identificadores permitem relacionar os registros entre os arquivos. A remoção de um imóvel deve considerar os registros dependentes associados a ele.
+
+As propostas são armazenadas com seus identificadores, a data e o conteúdo consolidado da configuração selecionada.
+
+## Persistência e tratamento de erros
+
+O sistema carrega os dados armazenados ao iniciar e salva as alterações realizadas durante a execução.
+
+As senhas são armazenadas utilizando hash PBKDF2-HMAC-SHA256 com salt, em vez de texto puro.
+
+O programa prevê o tratamento de arquivos ausentes, registros inválidos e arquivos que não possam ser lidos. Dependendo da situação, os dados inválidos são ignorados com aviso, ou o arquivo ilegível é isolado para evitar que seja utilizado como uma base válida.
+
+Os arquivos CSV devem manter os cabeçalhos esperados, o formato de separação e os tipos de dados definidos para cada campo. Alterações manuais nos arquivos podem comprometer a leitura ou a integridade dos relacionamentos.
+
+## Validação dos datasets
+
+O script `validar_datasets.py` verifica os catálogos de módulos, inversores e baterias.
+
+A validação contempla, entre outros pontos:
+
+- Presença das colunas obrigatórias.
+- Preenchimento dos campos essenciais.
+- Unicidade dos identificadores.
+- Validade dos valores numéricos.
+- Coerência básica das características técnicas.
+- Quantidade mínima de registros prevista para os catálogos.
+
+Para executar a validação:
+
+```bash
+python validar_datasets.py
+```
+
+Os catálogos devem manter informações de origem e rastreabilidade sempre que disponíveis. Dados técnicos inferidos, ajustados ou que necessitem de confirmação adicional devem ser identificados nas observações.
+
+## Saídas geradas
+
+O relatório comparativo entre imóveis gera um gráfico de barras salvo no diretório do projeto, com o nome:
+
+```text
+comparativo_imoveis.png
+```
+
+A proposta fotovoltaica é apresentada no terminal e registrada em `dados/propostas.csv`, permitindo recuperar os dados consolidados posteriormente.
+
+## Limitações do projeto
+
+O dimensionamento fotovoltaico é uma estimativa acadêmica e possui simplificações importantes:
+
+- Os resultados dependem da qualidade do histórico de consumo ou das estimativas baseadas nos equipamentos cadastrados.
+- A HSP representa um parâmetro médio e não prevê exatamente a geração em cada dia ou mês.
+- Os cálculos elétricos utilizam parâmetros de catálogo e não representam todas as condições de operação em campo.
+- A verificação de compatibilidade não substitui a análise completa de projeto, incluindo condições de temperatura, corrente de curto-circuito, limites específicos de entradas e strings, proteções e normas aplicáveis.
+- O orçamento não equivale a uma proposta comercial. Os preços podem variar, e o percentual de custos adicionais é uma estimativa simplificada.
+- A seleção de baterias depende dos dados disponíveis no catálogo e das premissas de capacidade e autonomia adotadas.
+- O percentual de atendimento energético estimado não garante independência da rede elétrica nem autonomia em caso de interrupção do fornecimento.
+
+Antes de uma instalação real, é necessário confirmar as especificações nos documentos oficiais dos fabricantes, avaliar as condições do local e elaborar o projeto com um profissional habilitado.
 
 ## Licença
 
