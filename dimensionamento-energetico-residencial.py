@@ -949,7 +949,7 @@ def obter_hsp(imovel):
     registro = buscar_hsp(imovel["cidade"], imovel["estado"])
 
     if registro is not None:
-        return registro["hsp"], "hsp.csv (normais climatológicas municipais)"
+        return registro["hsp"], "hsp.csv"
 
     print(f"\tSem dado solar para {imovel['cidade']}/{imovel['estado']}.")
     while True:
