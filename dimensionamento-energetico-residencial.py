@@ -10,10 +10,11 @@ import hashlib
 import secrets
 import json
 from datetime import datetime
+import io
+from contextlib import redirect_stdout
 
 # DATASETS
 # -----------------------------------------
-
 
 # HSP -------------------------------------
 CAMINHO_HSP = "hsp.csv"
@@ -36,6 +37,7 @@ COLUNAS_INVERSORES_NUM = ["potencia_nominal_w", "potencia_max_fv_w", "tensao_max
                           "faixa_mppt_min_v", "faixa_mppt_max_v", "corrente_max_entrada_a",
                           "numero_mppt", "tensao_bateria_min_v", "tensao_bateria_max_v", "preco_brl"]
 
+# BATERIAS --------------------------------
 CAMINHO_BATERIAS = "baterias.csv"
 COLUNAS_BATERIAS_TEXTO = ["id", "fabricante", "modelo", "tecnologia", "fornecedor", "data_coleta", "url_fonte"]
 COLUNAS_BATERIAS_NUM = ["tensao_nominal_v", "capacidade_ah", "capacidade_kwh", "dod_pct", "ciclos", "preco_brl"]
@@ -44,11 +46,19 @@ COLUNAS_BATERIAS_NUM = ["tensao_nominal_v", "capacidade_ah", "capacidade_kwh", "
 # -----------------------------------------
 LIMITE_PERCENTUAL = 100  # US01: 0 < f <= 100
 DIAS_GERACAO = 30  # D
-EFICIENCIA_SISTEMA = 0.80  # η
+EFICIENCIA_SISTEMA = 0.80  # PR (fator global de desempenho)
 DIAS_MES_BATERIA = 30  # divisor de E_d
 DOD_PADRAO = 0.80  # DoD usado em C_bat (US06)
 EFICIENCIA_BATERIA = 0.90  # η_bat
 
+JUSTIFICATIVA_PR = ("perdas típicas por temperatura, sujeira, cabeamento, inversor e "
+                    "descasamento entre módulos (faixa usual de projeto: 0,75 a 0,85)")
+RDC_AC_MIN = 0.8    # PB07: limites aceitos para a relação DC/AC
+RDC_AC_MAX = 1.5
+RDC_AC_IDEAL = 1.2  # usado só para ordenar as opções
+
+NOTA_EFICIENCIA_INVERSOR = ("eficiência do inversor não consta no dataset; suas perdas "
+                            "estão consideradas no PR adotado")
 
 # FUNÇÕES UTILITÁRIOS
 # -----------------------------------------
@@ -80,14 +90,8 @@ def pedir_campo(mensagem, funcao_validacao, erro):
 def validar_inteiro_positivo(valor):
     return valor.isdigit() and int(valor) > 0
 
-
 def validar_numero_positivo(valor):
-    try:
-        float(valor.replace(",", "."))
-        return float(valor) > 0
-    except ValueError:
-        return False
-
+    return validar_decimal_positivo(valor)
 
 def converter_numero(valor):
     return float(str(valor).strip().replace(",", "."))
@@ -95,7 +99,8 @@ def converter_numero(valor):
 
 def validar_decimal_positivo(valor):
     try:
-        return converter_numero(valor) > 0
+        n = converter_numero(valor)
+        return math.isfinite(n) and n > 0
     except ValueError:
         return False
 
@@ -160,6 +165,10 @@ def ler_csv_validado(caminho, colunas_texto, colunas_num):
                         motivo = f"campo '{c}' deve ser {'maior ou igual a zero' if permite_zero else 'maior que zero'}"
                         break
                     registro[c] = valor
+
+            if c.endswith("_pct") and valor > 100:
+                motivo = f"campo '{c}' não pode passar de 100"
+                break
 
             if motivo is None:
                 validos.append(registro)
@@ -611,8 +620,8 @@ def cadastrar_equipamento(imovel):
     equipamento = {
         "nome": nome,
         "quantidade": int(quantidade),
-        "potencia_watts": float(potencia),
-        "horas_uso": float(horas_uso)
+        "potencia_watts": converter_numero(potencia),
+        "horas_uso": converter_numero(horas_uso)
     }
 
     imovel["equipamentos"].append(equipamento)
@@ -667,7 +676,7 @@ def editar_equipamento(imovel):
         "Horas de uso deve ser um número maior que zero!")
 
     equipamento["quantidade"] = int(nova_quantidade)
-    equipamento["horas_uso"] = float(novas_horas)
+    equipamento["horas_uso"] = converter_numero(novas_horas)
 
     print("\tEQUIPAMENTO EDITADO COM SUCESSO!")
 
@@ -699,6 +708,8 @@ def calcular_consumo_equipamento(equipamento):
 def calcular_consumo_mensal(imovel):
     return sum(calcular_consumo_equipamento(equip) for equip in imovel["equipamentos"])
 
+def calcular_potencia_instalada_residencia(imovel):
+    return sum(e["potencia_watts"] * e["quantidade"] for e in imovel["equipamentos"]) / 1000  # kW
 
 def exibir_consumo_imovel(imovel):
     print(f"\n\tCONSUMO MENSAL ESTIMADO - {imovel['nome'].upper()}")
@@ -917,7 +928,10 @@ def definir_energia_mensal(imovel):
         print("\tImóvel sem dados de consumo. Cadastre equipamentos ou registre o consumo mensal.")
         return None
 
+    p_res_kw = calcular_potencia_instalada_residencia(imovel)
     print(f"Consumo de referência (C_m): {c_m:.2f} kWh/mês")
+    print(f"Consumo médio diário (E_dia = C_m / {DIAS_MES}): {c_m / DIAS_MES:.2f} kWh/dia")
+    print(f"Potência instalada da residência: {p_res_kw:.2f} kW")
     print(f"Origem do C_m: {origem}")
 
     f = converter_numero(pedir_campo(
@@ -929,7 +943,8 @@ def definir_energia_mensal(imovel):
     e_fv = c_m * (f / 100)
     print(f"\tENERGIA A GERAR (E_FV): {e_fv:.2f} kWh/mês")
 
-    return {"c_m": c_m, "origem_c_m": origem, "percentual": f, "e_fv": e_fv}
+    return {"c_m": c_m, "origem_c_m": origem, "percentual": f, "e_fv": e_fv,
+            "e_dia": c_m / DIAS_MES, "p_residencia_kw": p_res_kw}
 
 
 def buscar_hsp(cidade, estado):
@@ -966,6 +981,10 @@ def calcular_potencia_fv(imovel, e_fv):
 
     garantir_localizacao(imovel)
 
+    if not 0 < EFICIENCIA_SISTEMA <= 1:
+        print("\tPR inválido: deve ser maior que 0 e no máximo 1. Ajuste EFICIENCIA_SISTEMA.")
+        return None
+
     resultado = obter_hsp(imovel)
     if resultado is None:
         print("\tDimensionamento abortado: não há dado de irradiação (HSP) para o imóvel.")
@@ -974,11 +993,12 @@ def calcular_potencia_fv(imovel, e_fv):
     hsp, origem = resultado
     p_fv = e_fv / (hsp * DIAS_GERACAO * EFICIENCIA_SISTEMA)
 
-    print(f"HSP utilizado: {hsp:.2f} kWh/m²/dia")
-    print(f"Parâmetros: D = {DIAS_GERACAO} dias | η = {EFICIENCIA_SISTEMA}")
+    print(f"HSP utilizado: {hsp:.2f} kWh/m²/dia (fonte: {origem})")
+    print(f"PR adotado: {EFICIENCIA_SISTEMA:.2f} — {JUSTIFICATIVA_PR}")
+    print(f"Energia diária a gerar: {e_fv / DIAS_GERACAO:.2f} kWh/dia | D = {DIAS_GERACAO} dias")
     print(f"\tPOTÊNCIA NECESSÁRIA (P_FV): {p_fv:.2f} kWp")
 
-    return {"hsp": hsp, "p_fv": p_fv}
+    return {"hsp": hsp, "p_fv": p_fv, "pr": EFICIENCIA_SISTEMA}
 
 
 def calcular_geracao_estimada(p_instalada, hsp):
@@ -1000,6 +1020,7 @@ def exibir_instalacao(inst):
     print(f"Módulo: {m['fabricante']} {m['modelo']} ({m['potencia_wp']:.0f} Wp) [id {m['id']}]")
     print(f"Quantidade (N): {inst['n_modulos']}")
     print(f"Potência instalada: {inst['p_instalada']:.2f} kWp")
+    print(f"Geração estimada: {inst['geracao_estimada'] / DIAS_GERACAO:.2f} kWh/dia")
     print(f"\tGERAÇÃO ESTIMADA: {inst['geracao_estimada']:.2f} kWh/mês")
 
 
@@ -1068,7 +1089,9 @@ def escolher_armazenamento():
 
 def configurar_strings(inv, modulo, n):
     min_serie = math.ceil(inv["mppt_min_v"] / modulo["vmp_v"])
-    max_serie = math.floor(inv["tensao_max_v"] / modulo["voc_v"])
+    # (a) Vmp da string também precisa respeitar o MPPT máximo
+    max_serie = min(math.floor(inv["tensao_max_v"] / modulo["voc_v"]),
+                    math.floor(inv["mppt_max_v"] / modulo["vmp_v"]))
 
     if max_serie < 1 or min_serie > max_serie:
         return None
@@ -1087,17 +1110,22 @@ def configurar_strings(inv, modulo, n):
         if p_total_kw > inv["potencia_max_fv_kw"]:
             continue
 
+        r_dc_ac = p_total_kw / inv["potencia_nominal_kw"]
+        if not RDC_AC_MIN <= r_dc_ac <= RDC_AC_MAX:
+            continue
+
         # menor nº de módulos extras; empate -> mais módulos em série (menos strings)
         if melhor is None or total < melhor["total"]:
             melhor = {
                 "n_serie": n_serie, "n_strings": n_strings, "total": total,
                 "strings_por_mppt": strings_por_mppt, "corrente_mppt": corrente_mppt,
                 "p_total_kw": p_total_kw, "min_serie": min_serie, "max_serie": max_serie,
+                "r_dc_ac": r_dc_ac,
             }
     return melhor
 
 
-def selecionar_inversor(inst, com_bateria, inversores_excluidos=None):
+def selecionar_inversor(inst, com_bateria, inversores_excluidos=None, automatico=False):
     print("\n\t- SELEÇÃO DE INVERSOR")
 
     resultado = ler_csv_validado(CAMINHO_INVERSORES, COLUNAS_INVERSORES_TEXTO,
@@ -1109,10 +1137,14 @@ def selecionar_inversor(inst, com_bateria, inversores_excluidos=None):
     for inv in validos:
         inv["potencia_nominal_kw"] = inv.pop("potencia_nominal_w") / 1000
         inv["potencia_max_fv_kw"] = inv.pop("potencia_max_fv_w") / 1000
+
+        inv["mppt_max_v"] = inv.pop("faixa_mppt_max_v")
+
         inv["mppt_min_v"] = inv.pop("faixa_mppt_min_v")
         inv["tensao_max_v"] = inv.pop("tensao_max_entrada_v")
         inv["preco"] = inv.pop("preco_brl")
         inv["numero_mppt"] = int(inv["numero_mppt"])
+
     for numero, motivo in invalidos:
         print(f"\tAviso: linha {numero} de '{CAMINHO_INVERSORES}' ignorada ({motivo}).")
 
@@ -1132,9 +1164,24 @@ def selecionar_inversor(inst, com_bateria, inversores_excluidos=None):
         print("\tNenhum inversor do dataset é compatível com a configuração escolhida.")
         return None
 
-    inv, config = min(compativeis, key=lambda x: x[0]["preco"])  # critério: menor preço
+    compativeis.sort(key=lambda x: (abs(x[1]["r_dc_ac"] - RDC_AC_IDEAL), x[0]["preco"]))
 
     print(f"Inversores compatíveis: {len(compativeis)} de {len(validos)} analisados")
+    print("Ordenados por R_DC/AC mais próximo do ideal e, em empate, menor preço (o 1 é a sugestão):")
+    for i, (cand, cfg) in enumerate(compativeis, start=1):
+        print(f"{i} - {cand['fabricante']} {cand['modelo']} | {cand['potencia_nominal_kw']:.2f} kW | "
+              f"R_DC/AC {cfg['r_dc_ac']:.2f} | R$ {cand['preco']:,.2f}")
+
+    while True:
+        escolha = "" if automatico else input("Digite o número do inversor ou ENTER para aceitar a sugestão: ").strip()
+        if escolha == "":
+            inv, config = compativeis[0]
+            break
+        if escolha.isdigit() and 1 <= int(escolha) <= len(compativeis):
+            inv, config = compativeis[int(escolha) - 1]
+            break
+        print("\tOpção inválida.")
+
     print(f"Inversor selecionado: {inv['fabricante']} {inv['modelo']} [id {inv['id']}]")
     print("Parâmetros comparados:")
     print(f"  - Módulos por string: {config['n_serie']} "
@@ -1142,7 +1189,10 @@ def selecionar_inversor(inst, com_bateria, inversores_excluidos=None):
     print(f"  - Tensão Voc da string: {config['n_serie'] * modulo['voc_v']:.1f} V "
           f"(máx. {inv['tensao_max_v']:.0f} V)")
     print(f"  - Tensão Vmp da string: {config['n_serie'] * modulo['vmp_v']:.1f} V "
-          f"(MPPT mín. {inv['mppt_min_v']:.0f} V)")
+          f"(faixa MPPT {inv['mppt_min_v']:.0f} a {inv['mppt_max_v']:.0f} V)")
+    print(f"  - Relação DC/AC: {config['r_dc_ac']:.2f} "
+          f"({config['p_total_kw']:.2f} kWp / {inv['potencia_nominal_kw']:.2f} kW)")
+    print(f"  - Eficiência: {NOTA_EFICIENCIA_INVERSOR}")
     print(f"  - Strings: {config['n_strings']} em {int(inv['numero_mppt'])} MPPT(s) "
           f"-> {config['corrente_mppt']:.1f} A por MPPT "
           f"(máx. {inv['corrente_max_entrada_a']:.1f} A)")
@@ -1170,7 +1220,7 @@ def calcular_capacidade_bateria(c_m, autonomia_h):
 
 # ORQUESTRAÇÃO
 # -----------------------------------------
-def selecionar_bateria(c_bat, inversor):
+def selecionar_bateria(c_bat, inversor, automatico=False):
     """US07: escolhe a bateria compatível de menor custo por kWh útil."""
     print("\n\t- SELEÇÃO DE BATERIAS")
     resultado = ler_csv_validado(CAMINHO_BATERIAS, COLUNAS_BATERIAS_TEXTO, COLUNAS_BATERIAS_NUM)
@@ -1188,7 +1238,7 @@ def selecionar_bateria(c_bat, inversor):
         # A compatibilidade é limitada pela faixa de tensão declarada pelo inversor.
         if not (inv["tensao_bateria_min_v"] <= bat["tensao_nominal_v"] <= inv["tensao_bateria_max_v"]):
             continue
-        bat["n_baterias"] = math.ceil(c_bat / bat["capacidade_util_kwh"])
+        bat["n_baterias"] = math.ceil(c_bat / bat["capacidade_kwh"])
         bat["capacidade_instalada_kwh"] = bat["n_baterias"] * bat["capacidade_kwh"]
         bat["capacidade_util_instalada_kwh"] = bat["n_baterias"] * bat["capacidade_util_kwh"]
         bat["custo_total"] = bat["n_baterias"] * bat["preco"]
@@ -1214,7 +1264,7 @@ def selecionar_bateria(c_bat, inversor):
               f"R$ {bat['custo_por_kwh_util']:.2f}/kWh útil | {bat['n_baterias']} un. | "
               f"total R$ {bat['custo_total']:.2f}")
     while True:
-        escolha = input("Escolha uma bateria ou ENTER para aceitar a sugestão: ").strip()
+        escolha = "" if automatico else input("Escolha uma bateria ou ENTER para aceitar a sugestão: ").strip()
         if not escolha:
             selecionada = candidatos[0]
             break
@@ -1228,6 +1278,28 @@ def selecionar_bateria(c_bat, inversor):
           f"{selecionada['capacidade_util_instalada_kwh']:.2f} kWh úteis.")
     return selecionada
 
+def pedir_tarifa():
+    return converter_numero(pedir_campo(
+        "Tarifa de energia elétrica (R$/kWh, ex: 0,95): ",
+        validar_decimal_positivo,
+        "Tarifa inválida! Digite um número maior que zero."))
+
+def calcular_economia(energia, instalacao, tarifa):
+    """PB09/PB15: atendimento real, energia compensada e economia."""
+    geracao = instalacao["geracao_estimada"]
+    consumo = energia["c_m"]  # sempre > 0 aqui (obter_consumo_referencia garante)
+    compensada = min(geracao, consumo)
+    economia_mensal = compensada * tarifa
+    return {
+        "tarifa": tarifa,
+        "consumo_mensal": consumo,
+        "geracao_mensal": geracao,
+        "atendimento_pct": geracao / consumo * 100,
+        "compensada": compensada,
+        "excedente": max(geracao - consumo, 0),
+        "economia_mensal": economia_mensal,
+        "economia_anual": economia_mensal * 12,
+    }
 
 def exibir_resumo_proposta(imovel, proposta):
     """US09/US10: custos rastreáveis e resumo consolidado."""
@@ -1267,23 +1339,34 @@ def exibir_resumo_proposta(imovel, proposta):
     print("=" * 58)
     print(f"Imóvel: {imovel['nome']} ({imovel.get('cidade', '')}/{imovel.get('estado', '')})")
     print(f"Consumo de referência: {energia['c_m']:.2f} kWh/mês — {energia['origem_c_m']}")
+    print(f"Consumo médio diário: {energia.get('e_dia', energia['c_m'] / DIAS_MES):.2f} kWh/dia")
+    if energia.get("p_residencia_kw") is not None:
+        print(f"Potência instalada da residência: {energia['p_residencia_kw']:.2f} kW")
     print(f"Atendimento desejado: {energia['percentual']:.1f}% | Energia FV: {energia['e_fv']:.2f} kWh/mês")
     print(f"HSP: {potencia['hsp']:.3f} kWh/m²/dia (origem: {potencia.get('origem_hsp', 'dataset hsp.csv')})")
+    print(f"PR adotado: {potencia.get('pr', EFICIENCIA_SISTEMA):.2f} — {JUSTIFICATIVA_PR}")
     print(f"Potência necessária: {potencia['p_fv']:.2f} kWp | instalada: {inst['p_instalada']:.2f} kWp")
     print(f"Módulos: {inst['n_modulos']} × {modulo['fabricante']} {modulo['modelo']}")
     print(f"Inversor: {inv['fabricante']} {inv['modelo']} (id {inv['id']})")
-    print(f"Geração estimada: {inst['geracao_estimada']:.2f} kWh/mês")
+    rdc = proposta["inversor"]["configuracao"].get("r_dc_ac")
+    if rdc is not None:
+        print(f"Relação DC/AC: {rdc:.2f} | {NOTA_EFICIENCIA_INVERSOR}")
+    print(f"Geração estimada: {inst['geracao_estimada'] / DIAS_GERACAO:.2f} kWh/dia | "
+          f"{inst['geracao_estimada']:.2f} kWh/mês")
     if bateria:
         print(f"Armazenamento: com bateria | autonomia {proposta['armazenamento']['autonomia_h']:.1f} h")
+        print(f"Energia necessária para a autonomia: {proposta['capacidade_bateria']['e_autonomia']:.2f} kWh")
         print(f"Capacidade necessária: {proposta['capacidade_bateria']['c_bat']:.2f} kWh | "
               f"capacidade instalada: {bateria['capacidade_instalada_kwh']:.2f} kWh nominais "
               f"({bateria['capacidade_util_instalada_kwh']:.2f} kWh úteis)")
     else:
         print("Armazenamento: sem bateria")
-    print("\nESTIMATIVA DE CUSTOS")
-    print(f"Módulos: R$ {c_modulos:,.2f}")
-    print(f"Inversor: R$ {c_inversor:,.2f}")
-    print(f"Baterias: R$ {c_baterias:,.2f}")
+    print("\nORÇAMENTO"
+          "\n(item | fabricante/modelo | qtd | preço unit. | subtotal)")
+    for item in proposta["custos"]["itens"]:
+        subtotal = item["quantidade"] * item["preco_unitario_brl"]
+        print(f"- {item['tipo']} | {item['fabricante']} {item['modelo']} | {item['quantidade']} | "
+              f"R$ {item['preco_unitario_brl']:,.2f} | R$ {subtotal:,.2f}")
     print(f"Custo dos equipamentos: R$ {c_equipamentos:,.2f}")
     print(f"Demais custos estimados (estrutura, cabos, proteções e instalação; 20%): R$ {c_demais:,.2f}")
     print(f"CUSTO TOTAL ESTIMADO: R$ {c_total:,.2f}")
@@ -1292,10 +1375,152 @@ def exibir_resumo_proposta(imovel, proposta):
         print(f"- {item['tipo']}: id {item['id']} | fornecedor {item['fornecedor']} | "
               f"coleta {item['data_coleta']} | R$ {item['preco_unitario_brl']:,.2f}/un.")
         print(f"  Fonte: {item['url_fonte']}")
+
+    eco = proposta.get("economia")
+    if eco:
+        print("\nGERAÇÃO × CONSUMO")
+        print(f"Consumo mensal: {eco['consumo_mensal']:.2f} kWh | "
+              f"Geração mensal: {eco['geracao_mensal']:.2f} kWh")
+        print(f"ATENDIMENTO: {eco['atendimento_pct']:.1f}%")
+        if eco["excedente"] > 0:
+            print(f"A geração supera o consumo: {eco['compensada']:.2f} kWh efetivamente "
+                  f"consumidos/compensados e {eco['excedente']:.2f} kWh de excedente gerado.")
+
+        print("\nESTIMATIVA DE ECONOMIA")
+        print(f"Tarifa utilizada: R$ {eco['tarifa']:.2f}/kWh")
+        print(f"Energia compensada: {eco['compensada']:.2f} kWh/mês")
+        print(f"Economia mensal: R$ {eco['economia_mensal']:,.2f}")
+        print(f"Economia anual: R$ {eco['economia_anual']:,.2f}")
+        print("Premissas: tarifa constante (sem reajuste), compensação limitada ao consumo, "
+              "sem taxa de disponibilidade, sem degradação dos módulos.")
+        if eco["economia_anual"] > 0:
+            eco["payback_anos"] = c_total / eco["economia_anual"]
+            print(f"PAYBACK SIMPLES: {eco['payback_anos']:.1f} anos "
+                  f"({eco['payback_anos'] * 12:.0f} meses) — estimativa simples, "
+                  "não é previsão financeira exata.")
+        else:
+            print("Payback simples não calculável: a economia anual estimada é zero.")
     print("\nAVISO: pré-dimensionamento acadêmico. Não substitui projeto executivo, "
           "ART, vistoria, análise de sombreamento ou validação por profissional habilitado.")
     print("=" * 58)
 
+def completar_proposta(energia, potencia, instalacao, armazenamento, inversor, tarifa, automatico=False):
+    """Do ajuste de strings até o dicionário da proposta (usada nos dois cenários)."""
+    inversores_excluidos = set()
+    total = inversor["configuracao"]["total"]
+    if total != instalacao["n_modulos"]:
+        print(f"\n\tAjuste de strings: arranjo exige {total} módulos "
+              f"(dimensionamento inicial: {instalacao['n_modulos']}).")
+        instalacao = montar_instalacao(instalacao["modulo"], total, potencia["hsp"])
+        exibir_instalacao(instalacao)
+    capacidade_bateria = None
+    bateria = None
+    if armazenamento["com_bateria"]:
+        capacidade_bateria = calcular_capacidade_bateria(energia["c_m"], armazenamento["autonomia_h"])
+        while True:
+            bateria = selecionar_bateria(capacidade_bateria["c_bat"], inversor, automatico)
+            if bateria is not None:
+                break
+            inversores_excluidos.add(inversor["inversor"]["id"])
+            print("Tentando outra combinação de inversor e bateria (US08)...")
+            inversor = selecionar_inversor(instalacao, True, inversores_excluidos, automatico)
+            if inversor is None:
+                print("Proposta não gerada: não existe combinação válida de inversor e bateria. "
+                      "Revise os datasets ou escolha sem bateria.")
+                return None
+            total = inversor["configuracao"]["total"]
+            if total != instalacao["n_modulos"]:
+                instalacao = montar_instalacao(instalacao["modulo"], total, potencia["hsp"])
+                exibir_instalacao(instalacao)
+        armazenamento["custo_baterias"] = bateria["custo_total"]
+    return {
+        "energia": energia, "potencia": potencia, "instalacao": instalacao,
+        "armazenamento": armazenamento, "inversor": inversor, "bateria": bateria,
+        "capacidade_bateria": capacidade_bateria,
+        "economia": calcular_economia(energia, instalacao, tarifa),
+        "data_geracao": datetime.now().isoformat(timespec="seconds")
+    }
+
+
+def gerar_cenario_alternativo(proposta_base, tarifa):
+    """PB14: refaz o dimensionamento com a escolha oposta (com/sem bateria)."""
+    energia, potencia = proposta_base["energia"], proposta_base["potencia"]
+    com_bateria = not proposta_base["armazenamento"]["com_bateria"]
+    print(f"\n\tCENÁRIO ALTERNATIVO: {'COM' if com_bateria else 'SEM'} BATERIA")
+    if com_bateria:
+        autonomia = converter_numero(pedir_campo(
+            "Autonomia desejada (em horas): ", validar_decimal_positivo,
+            "Autonomia inválida! Digite um número maior que zero."))
+        armazenamento = {"com_bateria": True, "autonomia_h": autonomia, "custo_baterias": None}
+    else:
+        armazenamento = {"com_bateria": False, "autonomia_h": 0, "custo_baterias": 0.0}
+    modulo = proposta_base["instalacao"]["modulo"]
+    n = math.ceil((potencia["p_fv"] * 1000) / modulo["potencia_wp"])
+    instalacao = montar_instalacao(modulo, n, potencia["hsp"])
+    inversor = selecionar_inversor(instalacao, com_bateria, automatico=True)
+    if inversor is None:
+        print("Cenário alternativo não gerado: nenhum inversor compatível com o módulo escolhido.")
+        return None
+    return completar_proposta(energia, potencia, instalacao, armazenamento, inversor, tarifa, automatico=True)
+
+
+def registrar_proposta(usuario, imovel, proposta):
+    imovel.setdefault("propostas", [])
+    novo_id = max((p.get("id_proposta", 0) for i in usuario["imoveis"]
+                   for p in i.get("propostas", [])), default=0) + 1
+    imovel["propostas"].append({"id_proposta": novo_id, "data_geracao": proposta["data_geracao"],
+                                "dados": proposta})
+    print(f"\nProposta #{novo_id} salva em '{CAMINHO_PROPOSTAS}'.")
+    return novo_id
+
+
+def exibir_comparativo(a, b):
+    """PB14: os dois cenários lado a lado (exige exibir_resumo_proposta já chamado em ambos)."""
+    sem, com = (b, a) if a["armazenamento"]["com_bateria"] else (a, b)
+
+    def linhas(p):
+        inst, inv = p["instalacao"], p["inversor"]["inversor"]
+        bat, eco = p.get("bateria"), p["economia"]
+        payback = eco.get("payback_anos")
+        return [
+            ("Potência FV necessária", f"{p['potencia']['p_fv']:.2f} kWp"),
+            ("Potência FV instalada", f"{inst['p_instalada']:.2f} kWp"),
+            ("Módulos", f"{inst['n_modulos']} × {inst['modulo']['modelo']}"),
+            ("Inversor", f"{inv['fabricante']} {inv['modelo']}"),
+            ("Geração mensal", f"{inst['geracao_estimada']:.2f} kWh"),
+            ("Atendimento", f"{eco['atendimento_pct']:.1f}%"),
+            ("Armazenamento", f"{bat['n_baterias']} × {bat['modelo']}" if bat else "sem bateria"),
+            ("Capacidade instalada", f"{bat['capacidade_instalada_kwh']:.2f} kWh" if bat else "—"),
+            ("Autonomia", f"{p['armazenamento']['autonomia_h']:.1f} h" if bat else "—"),
+            ("Investimento total", f"R$ {p['custos']['total']:,.2f}"),
+            ("Economia anual", f"R$ {eco['economia_anual']:,.2f}"),
+            ("Payback simples", f"{payback:.1f} anos" if payback else "—"),
+        ]
+
+    print("\n" + "=" * 80)
+    print("COMPARAÇÃO DOS CENÁRIOS")
+    print("=" * 80)
+    print(f"{'':<24}{'SEM BATERIA':<28}{'COM BATERIA':<28}")
+    for (rotulo, v_sem), (_, v_com) in zip(linhas(sem), linhas(com)):
+        print(f"{rotulo:<24}{v_sem[:27]:<28}{v_com[:27]:<28}")
+    print(f"\nCusto adicional do armazenamento: R$ {com['custos']['total'] - sem['custos']['total']:,.2f}")
+    print("Obs.: a economia considera só a energia solar compensada; a bateria não gera "
+          "economia adicional neste modelo.")
+    print("=" * 80)
+
+def exportar_propostas(imovel, propostas):
+    """PB21: grava o(s) resumo(s) e o comparativo em um arquivo de texto."""
+    buffer = io.StringIO()
+    with redirect_stdout(buffer):  # reaproveita o que já é impresso na tela
+        for p in propostas:
+            exibir_resumo_proposta(imovel, p)
+        if len(propostas) == 2:
+            exibir_comparativo(propostas[0], propostas[1])
+    nome = re.sub(r"\W+", "_", normalizar(imovel["nome"])).strip("_")
+    caminho = f"proposta_{nome}_{datetime.now():%Y%m%d_%H%M%S}.txt"
+    with open(caminho, "w", encoding="utf-8") as f:
+        f.write(buffer.getvalue())
+    print(f"\tProposta exportada em: {caminho}")
 
 def dimensionar_fotovoltaico(usuario):
     print("\n\tDIMENSIONAMENTO FOTOVOLTAICO")
@@ -1328,49 +1553,50 @@ def dimensionar_fotovoltaico(usuario):
         instalacao = nova_instalacao
         inversores_excluidos.clear()
         inversor = selecionar_inversor(instalacao, armazenamento["com_bateria"])
-    total = inversor["configuracao"]["total"]
-    if total != instalacao["n_modulos"]:
-        print(
-            f"\n\tAjuste de strings: arranjo exige {total} módulos (dimensionamento inicial: {instalacao['n_modulos']}).")
-        instalacao = montar_instalacao(instalacao["modulo"], total, potencia["hsp"])
-        exibir_instalacao(instalacao)
-    capacidade_bateria = None
-    bateria = None
-    if armazenamento["com_bateria"]:
-        capacidade_bateria = calcular_capacidade_bateria(energia["c_m"], armazenamento["autonomia_h"])
-        while True:
-            bateria = selecionar_bateria(capacidade_bateria["c_bat"], inversor)
-            if bateria is not None:
-                break
-            inversores_excluidos.add(inversor["inversor"]["id"])
-            print("Tentando outra combinação de inversor e bateria (US08)...")
-            inversor = selecionar_inversor(instalacao, True, inversores_excluidos)
-            if inversor is None:
-                print("Proposta não gerada: não existe combinação válida de inversor e bateria. "
-                      "Revise os datasets ou escolha sem bateria.")
-                return
-            total = inversor["configuracao"]["total"]
-            if total != instalacao["n_modulos"]:
-                instalacao = montar_instalacao(instalacao["modulo"], total, potencia["hsp"])
-                exibir_instalacao(instalacao)
-        armazenamento["custo_baterias"] = bateria["custo_total"]
-    proposta = {
-        "energia": energia, "potencia": potencia, "instalacao": instalacao,
-        "armazenamento": armazenamento, "inversor": inversor, "bateria": bateria,
-        "capacidade_bateria": capacidade_bateria,
-        "data_geracao": datetime.now().isoformat(timespec="seconds")
-    }
+    tarifa = pedir_tarifa()
+    proposta = completar_proposta(energia, potencia, instalacao, armazenamento, inversor, tarifa)
+    if proposta is None:
+        return
     exibir_resumo_proposta(imovel, proposta)
-    imovel.setdefault("propostas", [])
-    novo_id = max((p.get("id_proposta", 0) for i in usuario["imoveis"] for p in i.get("propostas", [])), default=0) + 1
-    imovel["propostas"].append({"id_proposta": novo_id, "data_geracao": proposta["data_geracao"], "dados": proposta})
-    imovel["proposta"] = proposta
-    print(f"\nProposta #{novo_id} salva em '{CAMINHO_PROPOSTAS}'.")
-    input("Pressione ENTER para voltar ao menu principal...")
+    registrar_proposta(usuario, imovel, proposta)
+    propostas = [proposta]
 
+    if input("\nGerar o cenário alternativo (com/sem bateria) para comparação? (s/n): ").strip().lower() == "s":
+        alternativa = gerar_cenario_alternativo(proposta, tarifa)
+        if alternativa is not None:
+            exibir_resumo_proposta(imovel, alternativa)
+            registrar_proposta(usuario, imovel, alternativa)
+            exibir_comparativo(proposta, alternativa)
+            propostas.append(alternativa)
+
+    if input("Exportar a proposta para arquivo de texto? (s/n): ").strip().lower() == "s":
+        exportar_propostas(imovel, propostas)
+    input("Pressione ENTER para voltar ao menu principal...")
 
 OPCOES_QUE_ALTERAM_DADOS = ["1", "3", "4", "6", "9", "13"]
 
+def ver_propostas_salvas(usuario):
+    print("\n\tPROPOSTAS SALVAS")
+    imovel = selecionar_imovel(usuario)
+    if imovel is None:
+        return
+    propostas = imovel.get("propostas", [])
+    if not propostas:
+        print("Nenhuma proposta salva para este imóvel.")
+        return
+    for p in propostas:
+        tipo = "com bateria" if p["dados"]["armazenamento"]["com_bateria"] else "sem bateria"
+        print(f"#{p['id_proposta']} - {p['data_geracao']} - {tipo}")
+    escolha = input("Digite o número da proposta (sem o #) ou ENTER para voltar: ").strip()
+    if not escolha:
+        return
+    selecionada = next((p for p in propostas if str(p["id_proposta"]) == escolha), None)
+    if selecionada is None:
+        print("\tProposta não encontrada.")
+        return
+    exibir_resumo_proposta(imovel, selecionada["dados"])
+    if input("Exportar esta proposta para arquivo de texto? (s/n): ").strip().lower() == "s":
+        exportar_propostas(imovel, [selecionada["dados"]])
 
 def menu(usuario, usuarios):
     while True:
@@ -1389,6 +1615,7 @@ def menu(usuario, usuarios):
         print("11 - Comparativo entre imóveis")
         print("12 - Resumo energético anual")
         print("13 - Dimensionamento fotovoltaico")
+        print("14 - Ver propostas salvas")
 
         opcao = input("Escolha uma opção: ")
 
@@ -1431,33 +1658,13 @@ def menu(usuario, usuarios):
             resumo_energetico_anual(usuario)
         elif opcao == "13":
             dimensionar_fotovoltaico(usuario)
+        elif opcao == "14":
+            ver_propostas_salvas(usuario)
         else:
             print("Opção inválida, tente novamente.")
 
         if opcao in OPCOES_QUE_ALTERAM_DADOS:
             salvar_dados(usuarios)
-
-
-# CRIAÇÃO DE MODULOS E INVERSORES EM CASO DE ARQUIVOS NÃO EXISTENTES
-# -----------------------------------------
-def criar_csvs_exemplo():
-    if not os.path.exists(CAMINHO_MODULOS):
-        with open(CAMINHO_MODULOS, "w", newline="", encoding="utf-8") as f:
-            w = csv.writer(f)
-            w.writerow(["id", "fabricante", "modelo", "potencia_wp", "preco",
-                        "voc_v", "vmp_v", "imp_a"])
-            w.writerow(["M01", "FabricanteA", "Mod550", 550, 650, 49.5, 41.5, 13.25])
-            w.writerow(["M02", "FabricanteB", "Mod600", 600, 780, 51.0, 43.0, 13.95])
-
-    if not os.path.exists(CAMINHO_INVERSORES):
-        with open(CAMINHO_INVERSORES, "w", newline="", encoding="utf-8") as f:
-            w = csv.writer(f)
-            w.writerow(["id", "fabricante", "modelo", "potencia_nominal_kw", "potencia_max_fv_kw",
-                        "mppt_min_v", "tensao_max_v", "corrente_max_entrada_a",
-                        "numero_mppt", "preco", "compativel_bateria"])
-            w.writerow(["I01", "FabricanteX", "Inv5k", 5, 7.5, 80, 600, 16, 2, 3800, "nao"])
-            w.writerow(["I02", "FabricanteY", "Inv10k", 10, 15, 200, 1000, 20, 2, 6500, "sim"])
-
 
 # PROGRAMA PRINCIPAL
 # -----------------------------------------
@@ -1469,9 +1676,6 @@ usuarios = carregar_dados()
 
 # === CADASTRO / LOGIN ===
 usuario = tela_inicial(usuarios)
-
-# === CRIAÇÃO DE ARQUIVOS CSVs CASO NÃO TENHA ===
-criar_csvs_exemplo()
 
 # === MENU ===
 if usuario is not None:
