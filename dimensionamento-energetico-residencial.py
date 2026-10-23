@@ -1280,7 +1280,7 @@ def selecionar_bateria(c_bat, inversor, automatico=False):
 
 def pedir_tarifa():
     return converter_numero(pedir_campo(
-        "Tarifa de energia elétrica (R$/kWh, ex: 0,95): ",
+        "Para posterior análise, insira, por favor, a tarifa de energia elétrica (R$/kWh, ex: 0,95): ",
         validar_decimal_positivo,
         "Tarifa inválida! Digite um número maior que zero."))
 
@@ -1569,7 +1569,7 @@ def dimensionar_fotovoltaico(usuario):
             exibir_comparativo(proposta, alternativa)
             propostas.append(alternativa)
 
-    if input("Exportar a proposta para arquivo de texto? (s/n): ").strip().lower() == "s":
+    if input("\nExportar a proposta para arquivo de texto? (s/n): ").strip().lower() == "s":
         exportar_propostas(imovel, propostas)
     input("Pressione ENTER para voltar ao menu principal...")
 
